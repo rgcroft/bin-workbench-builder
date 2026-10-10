@@ -1,0 +1,559 @@
+<title>Bin Workbench Builder</title>
+<style>
+  /* Layout: dark workshop aesthetic, gold accent, monospace data */
+  :root {
+    --bg: #0a1628; --bg2: #111d2e; --border: #1a2a3e;
+    --gold: #e8b710; --gold2: #f0d060;
+    --text: #e0e7f0; --dim: #5a6b80; --mid: #8a9bb0; --bright: #c0c8d4;
+    --green: #7adb8a; --warn-bg: #2a1a0a; --warn-border: #5a3a1a; --warn: #e8a040;
+    --input-bg: #0d1822; --btn-bg: #1a2a3e; --btn-active: #1e3a5a; --btn-border: #2a4a6e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f0f2f5; --bg2: #fff; --border: #d0d5da;
+      --gold: #b8900a; --gold2: #9a7a08;
+      --text: #1a1a2e; --dim: #6a7585; --mid: #4a5565; --bright: #2a2a3e;
+      --green: #1a7a2a; --warn-bg: #fef3e0; --warn-border: #e0c080; --warn: #9a6010;
+      --input-bg: #f5f7fa; --btn-bg: #e8ecf0; --btn-active: #d0dae8; --btn-border: #90a8c0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0a1628; --bg2: #111d2e; --border: #1a2a3e;
+    --gold: #e8b710; --gold2: #f0d060;
+    --text: #e0e7f0; --dim: #5a6b80; --mid: #8a9bb0; --bright: #c0c8d4;
+    --green: #7adb8a; --warn-bg: #2a1a0a; --warn-border: #5a3a1a; --warn: #e8a040;
+    --input-bg: #0d1822; --btn-bg: #1a2a3e; --btn-active: #1e3a5a; --btn-border: #2a4a6e;
+    color-scheme: dark;
+  }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', -apple-system, sans-serif;
+    padding: 0;
+  }
+  * { box-sizing: border-box; }
+  input[type=number]::-webkit-inner-spin-button { opacity: 1; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  @media (max-width: 800px) {
+    .main-grid { grid-template-columns: 1fr !important; }
+  }
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+
+<div id="root"></div>
+
+<script>
+const { useState, useMemo, useCallback, createElement: h } = React;
+
+// ── MEASURED CUBBY DIMENSIONS ───────────────────────────────
+const CUBBY_DIMS = {
+  "12gal": {
+    long:  { opening: 15,     depth: 20.25, railH: 12.625, totalH: 14.5 },
+    short: { opening: 20.25,  depth: 15,    railH: 12.625, totalH: 14.5 },
+  },
+  "27gal": {
+    long:  { opening: 20.625, depth: 30.5,  railH: 12.75,  totalH: 15.5 },
+    short: { opening: 30.5,   depth: 20.625,railH: 12.75,  totalH: 15.5 },
+  },
+};
+
+const BIN_PRESETS = {
+  "12gal": {
+    name: "12 Gallon (Greenmade/Costco)",
+    overallW: 14.875, overallD: 20.375, overallH: 14.625,
+    hangW: 13.875, hangD: 18.75, hangH: 12.5,
+  },
+  "27gal": {
+    name: "27 Gallon (Greenmade/Costco)",
+    overallW: 20, overallD: 30, overallH: 15,
+    hangW: 18, hangD: 28, hangH: 12.75,
+  },
+  custom: {
+    name: "Custom",
+    overallW: 15, overallD: 20, overallH: 15,
+    hangW: 14, hangD: 18.5, hangH: 12,
+  },
+};
+
+const CLEARANCE = 0.25;
+const FRAME_MATERIALS = {
+  "2x4":     { name: '2×4 Lumber',         thickness: 1.5,  width: 3.5 },
+  "plywood": { name: '3/4" Plywood Strips',     thickness: 0.75, width: 3.5 },
+  "furring": { name: 'Poplar 1×2 Furring',  thickness: 0.75, width: 1.5 },
+};
+const SHELF_SUPPORT = { name: '1×2 Common Board', thickness: 0.75, width: 1.5 };
+const PLYWOOD_THICKNESS = 0.75;
+const WHEEL_HEIGHT = 3;
+const TOP_OVERHANG = 1.5;
+
+// ── CALCULATIONS ─────────────────────────────────────────────
+function calculateDimensions(config) {
+  const { cols, rows, slideOut, hasWheels, hasTop, hasBottomShelf, binPreset, frameMaterial, customBin } = config;
+  const frame = FRAME_MATERIALS[frameMaterial];
+  const orient = slideOut === "long" ? "long" : "short";
+
+  let cubbyOpening, cubbyDepth, cubbyRailH, cubbyTotalH;
+  if (binPreset !== "custom" && CUBBY_DIMS[binPreset]) {
+    const cd = CUBBY_DIMS[binPreset][orient];
+    cubbyOpening = cd.opening; cubbyDepth = cd.depth;
+    cubbyRailH = cd.railH; cubbyTotalH = cd.totalH;
+  } else {
+    const bin = customBin;
+    cubbyOpening = orient === "long" ? bin.hangW + CLEARANCE * 2 : bin.hangD + CLEARANCE * 2;
+    cubbyDepth = orient === "long" ? bin.overallD + CLEARANCE * 2 : bin.overallW + CLEARANCE * 2;
+    cubbyRailH = bin.hangH + CLEARANCE;
+    cubbyTotalH = bin.overallH + CLEARANCE;
+  }
+
+  const frameW = cols * cubbyOpening + (cols + 1) * frame.thickness;
+  const cubbyAreaH = rows * cubbyTotalH + (rows + 1) * SHELF_SUPPORT.width;
+  const frameD = cubbyDepth + frame.thickness * 2;
+  const totalW = frameW;
+  const totalH = cubbyAreaH + (hasWheels ? WHEEL_HEIGHT : 0) + (hasTop ? PLYWOOD_THICKNESS : 0) + (hasBottomShelf ? PLYWOOD_THICKNESS : 0);
+  const totalD = frameD;
+  const topW = hasTop ? totalW + TOP_OVERHANG * 2 : totalW;
+  const topD = hasTop ? totalD + TOP_OVERHANG * 2 : totalD;
+  const totalBins = cols * rows;
+
+  // Cut list
+  const frameWidthRailCount = 4;
+  const frameWidthRailLength = totalW;
+  const frameDepthRailCount = 4;
+  const frameDepthRailLength = totalD - frame.thickness * 2;
+  const frameDividerCount = (cols - 1) * 2;
+  const frameDividerLength = frameDepthRailLength;
+  const uprightCount = (cols + 1) * 2;
+  const uprightLength = cubbyAreaH;
+  const shelfLevelCount = rows + 1;
+  const shelfRailsPerLevel = cols * 2;
+  const totalShelfRails = shelfLevelCount * shelfRailsPerLevel;
+  const shelfRailLength = frameDepthRailLength;
+
+  const plywoodSheets = Math.ceil(((hasTop ? topW * topD : 0) + (hasBottomShelf ? totalW * totalD : 0)) / (48 * 96));
+  const allFramePieces = frameWidthRailCount * frameWidthRailLength + frameDepthRailCount * frameDepthRailLength + frameDividerCount * frameDividerLength + uprightCount * uprightLength;
+  let frameTotal;
+  if (frameMaterial === "plywood") {
+    frameTotal = Math.ceil((allFramePieces * frame.width) / (48 * 96));
+  } else {
+    frameTotal = Math.ceil(allFramePieces / 96);
+  }
+  const eightFtOneBys = Math.ceil((totalShelfRails * shelfRailLength) / 96);
+
+  return {
+    totalW, totalH, totalD, topW, topD, frameW, cubbyAreaH, frameD,
+    cubbyOpening, cubbyDepth, cubbyRailH, cubbyTotalH,
+    totalBins, plywoodSheets, frameTotal, eightFtOneBys,
+    frameMaterial, frame,
+    frameWidthRailCount, frameWidthRailLength,
+    frameDepthRailCount, frameDepthRailLength,
+    frameDividerCount, frameDividerLength,
+    uprightCount, uprightLength, totalShelfRails, shelfRailLength,
+  };
+}
+
+function fitToSpace(spaceW, spaceD, spaceH, config) {
+  const frame = FRAME_MATERIALS[config.frameMaterial];
+  const orient = config.slideOut === "long" ? "long" : "short";
+  let cubbyOpening, cubbyTotalH;
+  if (config.binPreset !== "custom" && CUBBY_DIMS[config.binPreset]) {
+    const cd = CUBBY_DIMS[config.binPreset][orient];
+    cubbyOpening = cd.opening; cubbyTotalH = cd.totalH;
+  } else {
+    const bin = config.customBin;
+    cubbyOpening = orient === "long" ? bin.hangW + CLEARANCE * 2 : bin.hangD + CLEARANCE * 2;
+    cubbyTotalH = bin.overallH + CLEARANCE;
+  }
+  const availH = spaceH - (config.hasWheels ? WHEEL_HEIGHT : 0) - (config.hasTop ? PLYWOOD_THICKNESS : 0) - (config.hasBottomShelf ? PLYWOOD_THICKNESS : 0);
+  const maxCols = Math.floor((spaceW - frame.thickness) / (cubbyOpening + frame.thickness));
+  const maxRows = Math.floor((availH - SHELF_SUPPORT.width) / (cubbyTotalH + SHELF_SUPPORT.width));
+  return { maxCols: Math.max(1, maxCols), maxRows: Math.max(1, maxRows) };
+}
+
+// ── FRACTION FORMATTER ───────────────────────────────────────
+function fmtFrac(n) {
+  const whole = Math.floor(n);
+  const frac = n - whole;
+  if (frac < 0.0625) return "" + whole;
+  if (frac < 0.1875) return whole + " 1/8";
+  if (frac < 0.3125) return whole + " 1/4";
+  if (frac < 0.4375) return whole + " 3/8";
+  if (frac < 0.5625) return whole + " 1/2";
+  if (frac < 0.6875) return whole + " 5/8";
+  if (frac < 0.8125) return whole + " 3/4";
+  if (frac < 0.9375) return whole + " 7/8";
+  return "" + (whole + 1);
+}
+
+// ── 3D PREVIEW ───────────────────────────────────────────────
+function WorkbenchPreview({ config, dims }) {
+  const scale = Math.min(420 / Math.max(dims.topW, dims.totalW), 260 / (dims.totalH + dims.totalD * 0.4));
+  const s = scale;
+  const ox = 40, oy = 24;
+  const isoX = (x, _y, z) => ox + x * s + z * s * 0.35;
+  const isoY = (_x, y, z) => oy + (dims.totalH - y) * s + z * s * 0.2;
+
+  const matColors = {
+    "2x4":     { wood: "#c4a265", dark: "#a8894f", light: "#d4b87a" },
+    "plywood": { wood: "#c9b896", dark: "#a89878", light: "#d8cbb0" },
+    "furring": { wood: "#d4b07a", dark: "#b89060", light: "#e0c490" },
+  };
+  const mc = matColors[dims.frameMaterial] || matColors["2x4"];
+  const { cols, rows, hasWheels, hasTop, hasBottomShelf } = config;
+  const { cubbyOpening, cubbyDepth, cubbyTotalH } = dims;
+  const ft = dims.frame.thickness;
+  const els = [];
+  let key = 0;
+  const baseY = hasWheels ? WHEEL_HEIGHT : 0;
+  const shelfBase = baseY + (hasBottomShelf ? PLYWOOD_THICKNESS : 0);
+
+  // Wheels
+  if (hasWheels) {
+    [[ft*2,ft*2],[dims.totalW-ft*2,ft*2],[ft*2,dims.totalD-ft*2],[dims.totalW-ft*2,dims.totalD-ft*2]].forEach(function(p){
+      els.push(h("ellipse",{key:key++,cx:isoX(p[0],0,p[1]),cy:isoY(p[0],WHEEL_HEIGHT/2,p[1]),rx:WHEEL_HEIGHT*s*0.4,ry:WHEEL_HEIGHT*s*0.25,fill:"#333",stroke:"#222",strokeWidth:1}));
+    });
+  }
+
+  // Bottom shelf
+  if (hasBottomShelf) {
+    var pts = [[0,baseY+PLYWOOD_THICKNESS,0],[dims.totalW,baseY+PLYWOOD_THICKNESS,0],[dims.totalW,baseY+PLYWOOD_THICKNESS,dims.totalD],[0,baseY+PLYWOOD_THICKNESS,dims.totalD]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+    els.push(h("polygon",{key:key++,points:pts,fill:mc.light,stroke:mc.dark,strokeWidth:0.5}));
+  }
+
+  // Uprights
+  for (var c=0;c<=cols;c++){
+    var x=c*(cubbyOpening+ft);
+    els.push(h("line",{key:key++,x1:isoX(x,shelfBase,0),y1:isoY(x,shelfBase,0),x2:isoX(x,shelfBase+dims.cubbyAreaH,0),y2:isoY(x,shelfBase+dims.cubbyAreaH,0),stroke:mc.wood,strokeWidth:ft*s*0.65}));
+    els.push(h("line",{key:key++,x1:isoX(x,shelfBase,dims.totalD),y1:isoY(x,shelfBase,dims.totalD),x2:isoX(x,shelfBase+dims.cubbyAreaH,dims.totalD),y2:isoY(x,shelfBase+dims.cubbyAreaH,dims.totalD),stroke:mc.dark,strokeWidth:ft*s*0.5,opacity:0.4}));
+  }
+
+  // Shelf rails
+  for (var r=0;r<=rows;r++){
+    var y=shelfBase+r*(cubbyTotalH+SHELF_SUPPORT.width);
+    els.push(h("line",{key:key++,x1:isoX(0,y+SHELF_SUPPORT.width/2,0),y1:isoY(0,y+SHELF_SUPPORT.width/2,0),x2:isoX(dims.totalW,y+SHELF_SUPPORT.width/2,0),y2:isoY(dims.totalW,y+SHELF_SUPPORT.width/2,0),stroke:"#b8a070",strokeWidth:SHELF_SUPPORT.width*s*0.35}));
+  }
+
+  // Bins
+  for (var r=0;r<rows;r++){
+    for (var c=0;c<cols;c++){
+      var bx=c*(cubbyOpening+ft)+ft;
+      var by=shelfBase+SHELF_SUPPORT.width+r*(cubbyTotalH+SHELF_SUPPORT.width);
+      var bz=ft;
+      var bodyH=cubbyTotalH*0.85;
+      var body=[[bx,by,bz],[bx+cubbyOpening,by,bz],[bx+cubbyOpening,by+bodyH,bz],[bx,by+bodyH,bz]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+      els.push(h("polygon",{key:key++,points:body,fill:"#2a2d2e",stroke:"#1a1d1e",strokeWidth:0.5}));
+      var lid=[[bx,by+bodyH,bz],[bx+cubbyOpening,by+bodyH,bz],[bx+cubbyOpening,by+cubbyTotalH,bz],[bx,by+cubbyTotalH,bz]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+      els.push(h("polygon",{key:key++,points:lid,fill:"#e8b710",stroke:"#c99e0e",strokeWidth:0.5}));
+      var lidTop=[[bx,by+cubbyTotalH,bz],[bx+cubbyOpening,by+cubbyTotalH,bz],[bx+cubbyOpening,by+cubbyTotalH,bz+cubbyDepth*0.55],[bx,by+cubbyTotalH,bz+cubbyDepth*0.55]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+      els.push(h("polygon",{key:key++,points:lidTop,fill:"#f0c420",stroke:"#c99e0e",strokeWidth:0.3,opacity:0.5}));
+    }
+  }
+
+  // Top
+  if (hasTop){
+    var topY=shelfBase+dims.cubbyAreaH+PLYWOOD_THICKNESS;
+    var ov=TOP_OVERHANG;
+    var front=[[-ov,topY,-ov],[dims.totalW+ov,topY,-ov],[dims.totalW+ov,topY-PLYWOOD_THICKNESS,-ov],[-ov,topY-PLYWOOD_THICKNESS,-ov]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+    var side=[[dims.totalW+ov,topY,-ov],[dims.totalW+ov,topY,dims.totalD+ov],[dims.totalW+ov,topY-PLYWOOD_THICKNESS,dims.totalD+ov],[dims.totalW+ov,topY-PLYWOOD_THICKNESS,-ov]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+    var top=[[- ov,topY,-ov],[dims.totalW+ov,topY,-ov],[dims.totalW+ov,topY,dims.totalD+ov],[-ov,topY,dims.totalD+ov]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+    els.push(h("polygon",{key:key++,points:front,fill:mc.dark,stroke:"#8a7040",strokeWidth:0.5}));
+    els.push(h("polygon",{key:key++,points:side,fill:mc.wood,stroke:"#8a7040",strokeWidth:0.5}));
+    els.push(h("polygon",{key:key++,points:top,fill:mc.light,stroke:mc.dark,strokeWidth:1}));
+  }
+
+  // Pegboard hint
+  var pegY1=shelfBase+SHELF_SUPPORT.width;
+  var pegY2=shelfBase+dims.cubbyAreaH;
+  var peg=[[dims.totalW,pegY1,0],[dims.totalW,pegY1,dims.totalD],[dims.totalW,pegY2,dims.totalD],[dims.totalW,pegY2,0]].map(function(v){return isoX(v[0],v[1],v[2])+","+isoY(v[0],v[1],v[2])}).join(" ");
+  els.push(h("polygon",{key:key++,points:peg,fill:"#d0d5da",stroke:"#b0b5ba",strokeWidth:0.5,opacity:0.6}));
+
+  var svgW=Math.max(520,(dims.topW||dims.totalW)*s+140);
+  var svgH=Math.max(300,(dims.totalH+dims.totalD*0.4)*s+60);
+
+  return h("svg",{viewBox:"0 0 "+svgW+" "+svgH,style:{width:"100%",maxWidth:640,height:"auto"}},
+    h("defs",null,h("linearGradient",{id:"bgGrad",x1:0,y1:0,x2:0,y2:1},h("stop",{offset:"0%",stopColor:"#1a2332"}),h("stop",{offset:"100%",stopColor:"#0d1520"}))),
+    h("rect",{width:svgW,height:svgH,fill:"url(#bgGrad)",rx:8}),
+    els
+  );
+}
+
+// ── UI COMPONENTS ────────────────────────────────────────────
+function NumberInput({ label, value, onChange, min, max, step, unit }) {
+  step = step || 1;
+  const [localValue, setLocalValue] = useState(String(value));
+  const handleChange = function(e) {
+    var raw = e.target.value; setLocalValue(raw);
+    var num = parseFloat(raw);
+    if (!isNaN(num) && num >= min && num <= max) onChange(num);
+  };
+  const handleBlur = function() {
+    var num = parseFloat(localValue);
+    if (isNaN(num) || num < min) { onChange(min); setLocalValue(String(min)); }
+    else if (num > max) { onChange(max); setLocalValue(String(max)); }
+    else { onChange(num); setLocalValue(String(num)); }
+  };
+  return h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+    h("label",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",textTransform:"uppercase",letterSpacing:"0.05em"}},label),
+    h("div",{style:{display:"flex",alignItems:"center",gap:6}},
+      h("input",{type:"number",value:localValue,onChange:handleChange,onBlur:handleBlur,onFocus:function(){setLocalValue(String(value))},min:min,max:max,step:step,style:{width:72,padding:"8px 10px",border:"1px solid var(--border)",borderRadius:6,background:"var(--input-bg)",color:"var(--text)",fontSize:14,fontFamily:"monospace",outline:"none"}}),
+      unit ? h("span",{style:{fontSize:12,color:"var(--dim)"}},unit) : null
+    )
+  );
+}
+
+function Stepper({ label, value, onChange, min, max }) {
+  return h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
+    h("label",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",textTransform:"uppercase",letterSpacing:"0.05em"}},label),
+    h("div",{style:{display:"flex",alignItems:"center",gap:0}},
+      h("button",{onClick:function(){onChange(Math.max(min,value-1))},style:{width:36,height:36,border:"1px solid var(--border)",borderRadius:"6px 0 0 6px",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value<=min?"not-allowed":"pointer",opacity:value<=min?0.4:1}},"-"),
+      h("div",{style:{width:44,height:36,display:"flex",alignItems:"center",justifyContent:"center",background:"var(--input-bg)",borderTop:"1px solid var(--border)",borderBottom:"1px solid var(--border)",color:"var(--text)",fontSize:16,fontWeight:700,fontFamily:"monospace"}},value),
+      h("button",{onClick:function(){onChange(Math.min(max,value+1))},style:{width:36,height:36,border:"1px solid var(--border)",borderRadius:"0 6px 6px 0",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value>=max?"not-allowed":"pointer",opacity:value>=max?0.4:1}},"+")
+    )
+  );
+}
+
+function Toggle({ label, checked, onChange }) {
+  return h("label",{style:{display:"flex",alignItems:"center",gap:10,cursor:"pointer",userSelect:"none"}},
+    h("div",{onClick:function(){onChange(!checked)},style:{width:40,height:22,borderRadius:11,position:"relative",background:checked?"var(--gold)":"var(--border)",transition:"background 0.2s",cursor:"pointer",flexShrink:0}},
+      h("div",{style:{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:2,left:checked?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}})
+    ),
+    h("span",{style:{fontSize:13,color:"var(--bright)",fontWeight:500}},label)
+  );
+}
+
+function Section({ title, children }) {
+  return h("div",{style:{background:"var(--bg2)",borderRadius:12,padding:16,border:"1px solid var(--border)"}},
+    h("div",{style:{fontSize:12,fontWeight:700,color:"var(--gold)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:12}},title),
+    children
+  );
+}
+
+function OptionButtons({ options, value, onChange }) {
+  return h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+    options.map(function(opt){
+      return h("button",{key:opt[0],onClick:function(){onChange(opt[0])},style:{flex:1,minWidth:90,padding:"10px 8px",borderRadius:8,border:value===opt[0]?"1px solid var(--btn-border)":"1px solid transparent",background:value===opt[0]?"var(--btn-active)":"var(--btn-bg)",color:value===opt[0]?"var(--gold)":"var(--mid)",fontWeight:600,fontSize:12,cursor:"pointer",transition:"all 0.15s"}},opt[1]);
+    })
+  );
+}
+
+// ── CUT LIST ITEM ────────────────────────────────────────────
+function CutItem({ name, note, qty, detail }) {
+  return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--input-bg)",borderRadius:8}},
+    h("div",null,
+      h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},name),
+      note ? h("div",{style:{fontSize:11,color:"var(--dim)"}},note) : null
+    ),
+    h("div",{style:{textAlign:"right",flexShrink:0,marginLeft:12}},
+      h("div",{style:{fontSize:14,fontWeight:700,color:"var(--gold)",fontFamily:"monospace"}},"×"+qty),
+      h("div",{style:{fontSize:11,color:"var(--dim)"}},detail)
+    )
+  );
+}
+
+// ── MAIN APP ─────────────────────────────────────────────────
+function App() {
+  const [mode, setMode] = useState("manual");
+  const [config, setConfig] = useState({
+    cols:4, rows:2, slideOut:"long", hasWheels:true, hasTop:true, hasBottomShelf:true,
+    binPreset:"12gal", frameMaterial:"2x4",
+    customBin: { overallW:15, overallD:20, overallH:15, hangW:14, hangD:18.5, hangH:12 },
+  });
+  const [spaceW, setSpaceW] = useState(96);
+  const [spaceD, setSpaceD] = useState(30);
+  const [spaceH, setSpaceH] = useState(42);
+
+  const update = useCallback(function(key,val){ setConfig(function(p){ return Object.assign({},p,{[key]:val}); }); },[]);
+  const updateCustomBin = useCallback(function(key,val){ setConfig(function(p){ return Object.assign({},p,{customBin:Object.assign({},p.customBin,{[key]:val})}); }); },[]);
+
+  const fitResult = useMemo(function(){ return mode==="fitToSpace" ? fitToSpace(spaceW,spaceD,spaceH,config) : null; },[mode,spaceW,spaceD,spaceH,config]);
+  const activeConfig = useMemo(function(){
+    if (mode==="fitToSpace" && fitResult) return Object.assign({},config,{cols:fitResult.maxCols,rows:fitResult.maxRows});
+    return config;
+  },[config,mode,fitResult]);
+  const dims = useMemo(function(){ return calculateDimensions(activeConfig); },[activeConfig]);
+
+  var frameName = function(short) {
+    if (config.frameMaterial==="2x4") return short ? "2×4" : "2×4 Lumber";
+    if (config.frameMaterial==="plywood") return short ? '3/4" ply' : '3/4" Plywood Strips';
+    return short ? "1×2 furring" : "Poplar 1×2 Furring";
+  };
+  var sagWarning = config.frameMaterial === "furring" && dims.cubbyOpening > 18;
+  var orientLabel = config.slideOut === "long" ? "Long" : "Short";
+
+  return h("div",{style:{minHeight:"100vh",background:"var(--bg)",color:"var(--text)",fontFamily:"'Segoe UI', -apple-system, sans-serif",padding:"20px 16px"}},
+
+    // Header
+    h("div",{style:{maxWidth:1140,margin:"0 auto"}},
+      h("div",{style:{marginBottom:24}},
+        h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:4}},
+          h("div",{style:{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg, var(--gold), #c99e0e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800}},"⚙"),
+          h("h1",{style:{fontSize:24,fontWeight:800,margin:0,color:"var(--gold)"}},"Bin Workbench Builder")
+        ),
+        h("p",{style:{margin:0,fontSize:13,color:"var(--dim)"}},"Greenmade / Costco tote storage workbench configurator")
+      ),
+
+      h("div",{className:"main-grid",style:{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}},
+
+        // ── LEFT PANEL ──
+        h("div",{style:{display:"flex",flexDirection:"column",gap:14,minWidth:0}},
+
+          h(Section,{title:"Build Mode"},
+            h(OptionButtons,{options:[["manual","Manual Layout"],["fitToSpace","Fit to Space"]],value:mode,onChange:setMode})
+          ),
+
+          mode === "fitToSpace" ? h(Section,{title:"Available Space"},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
+              h(NumberInput,{label:"Width",value:spaceW,onChange:setSpaceW,min:20,max:240,unit:"in"}),
+              h(NumberInput,{label:"Depth",value:spaceD,onChange:setSpaceD,min:20,max:60,unit:"in"}),
+              h(NumberInput,{label:"Height",value:spaceH,onChange:setSpaceH,min:20,max:80,unit:"in"})
+            ),
+            fitResult ? h("div",{style:{marginTop:12,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:13,color:"var(--green)",fontFamily:"monospace"}},
+              "Best fit: ",h("strong",null,fitResult.maxCols+"×"+fitResult.maxRows)," (",fitResult.maxCols*fitResult.maxRows," bins)"
+            ) : null
+          ) : null,
+
+          mode === "manual" ? h(Section,{title:"Grid Layout"},
+            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+              h(Stepper,{label:"Columns",value:config.cols,onChange:function(v){update("cols",v)},min:1,max:10}),
+              h(Stepper,{label:"Rows",value:config.rows,onChange:function(v){update("rows",v)},min:1,max:6})
+            )
+          ) : null,
+
+          h(Section,{title:"Bin Size"},
+            h(OptionButtons,{options:[["12gal","12 Gallon"],["27gal","27 Gallon"],["custom","Custom"]],value:config.binPreset,onChange:function(v){update("binPreset",v)}}),
+            config.binPreset !== "custom" ? h("div",{style:{marginTop:10,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:12,color:"var(--mid)"}},
+              h("div",{style:{marginBottom:4,fontWeight:600,color:"var(--bright)"}},BIN_PRESETS[config.binPreset].name),
+              h("div",{style:{fontSize:11,color:"var(--dim)",marginBottom:6}},"Measured cubby dimensions:"),
+              h("div",null,"Opening: "+fmtFrac(dims.cubbyOpening)+"\" · Depth: "+fmtFrac(dims.cubbyDepth)+"\""),
+              h("div",null,"Rail height: "+fmtFrac(dims.cubbyRailH)+"\" · Total: "+fmtFrac(dims.cubbyTotalH)+"\""),
+              h("div",{style:{marginTop:4,fontSize:11,color:"var(--dim)"}},orientLabel+" side on rails ("+(config.slideOut==="long"?"deep frame, narrow opening":"shallow frame, wide opening")+")")
+            ) : null,
+            config.binPreset === "custom" ? h("div",{style:{marginTop:10}},
+              h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",marginBottom:6}},"OVERALL (with lid)"),
+              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}},
+                h(NumberInput,{label:"Width",value:config.customBin.overallW,onChange:function(v){updateCustomBin("overallW",v)},min:6,max:40,step:0.125,unit:"in"}),
+                h(NumberInput,{label:"Depth",value:config.customBin.overallD,onChange:function(v){updateCustomBin("overallD",v)},min:6,max:40,step:0.125,unit:"in"}),
+                h(NumberInput,{label:"Height",value:config.customBin.overallH,onChange:function(v){updateCustomBin("overallH",v)},min:4,max:30,step:0.125,unit:"in"})
+              ),
+              h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",marginBottom:6}},"HANG POINT (lip)"),
+              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+                h(NumberInput,{label:"Width",value:config.customBin.hangW,onChange:function(v){updateCustomBin("hangW",v)},min:5,max:38,step:0.125,unit:"in"}),
+                h(NumberInput,{label:"Depth",value:config.customBin.hangD,onChange:function(v){updateCustomBin("hangD",v)},min:5,max:38,step:0.125,unit:"in"}),
+                h(NumberInput,{label:"Height",value:config.customBin.hangH,onChange:function(v){updateCustomBin("hangH",v)},min:3,max:28,step:0.125,unit:"in"})
+              )
+            ) : null
+          ),
+
+          h(Section,{title:"Slide-Out Orientation"},
+            h(OptionButtons,{options:[["long","Long Side on Rails"],["short","Short Side on Rails"]],value:config.slideOut,onChange:function(v){update("slideOut",v)}}),
+            h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)",lineHeight:1.5}},
+              config.slideOut==="long"
+                ? "Long side sits on rails going into depth. Short side faces you as the opening."
+                : "Short side sits on rails going into depth. Long side faces you as a wider opening."
+            )
+          ),
+
+          h(Section,{title:"Frame Material"},
+            h(OptionButtons,{options:[["2x4","2×4 Lumber"],["plywood",'3/4" Plywood'],["furring","1×2 Furring"]],value:config.frameMaterial,onChange:function(v){update("frameMaterial",v)}}),
+            h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)"}},
+              config.frameMaterial==="furring"
+                ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Orient 1.5" side vertical for best sag resistance.'
+                : "Shelf supports: 1×2 common boards ("+SHELF_SUPPORT.thickness+"\" × "+SHELF_SUPPORT.width+"\")"
+            ),
+            sagWarning ? h("div",{style:{marginTop:8,padding:8,background:"var(--warn-bg)",borderRadius:6,border:"1px solid var(--warn-border)",fontSize:11,color:"var(--warn)",lineHeight:1.5}},
+              "⚠ Opening is "+fmtFrac(dims.cubbyOpening)+"\". Furring strips may sag on spans over 18\". Consider adding a center divider or using 1×2 common boards for shelf rails."
+            ) : null
+          ),
+
+          h(Section,{title:"Features"},
+            h("div",{style:{display:"flex",flexDirection:"column",gap:14}},
+              h(Toggle,{label:'Flat Top (3/4" plywood work surface)',checked:config.hasTop,onChange:function(v){update("hasTop",v)}}),
+              h(Toggle,{label:'Bottom Shelf (3/4" plywood)',checked:config.hasBottomShelf,onChange:function(v){update("hasBottomShelf",v)}}),
+              h(Toggle,{label:"Caster Wheels",checked:config.hasWheels,onChange:function(v){update("hasWheels",v)}})
+            )
+          )
+        ),
+
+        // ── RIGHT PANEL ──
+        h("div",{style:{display:"flex",flexDirection:"column",gap:16,minWidth:0}},
+
+          h(Section,{title:"Preview"},
+            h(WorkbenchPreview,{config:activeConfig,dims:dims})
+          ),
+
+          h(Section,{title:"Overall Dimensions"},
+            h("div",{style:{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:10}},
+              [["Width",fmtFrac(config.hasTop?dims.topW:dims.totalW)+'"'],["Depth",fmtFrac(config.hasTop?dims.topD:dims.totalD)+'"'],["Height",fmtFrac(dims.totalH)+'"'],["Total Bins",dims.totalBins]].map(function(item){
+                return h("div",{key:item[0],style:{background:"var(--input-bg)",borderRadius:8,padding:"12px 8px",textAlign:"center"}},
+                  h("div",{style:{fontSize:18,fontWeight:700,color:"var(--gold)",fontFamily:"monospace"}},item[1]),
+                  h("div",{style:{fontSize:10,color:"var(--dim)",marginTop:3,fontWeight:600,textTransform:"uppercase"}},item[0])
+                );
+              })
+            ),
+            h("div",{style:{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
+              [["Opening",dims.cubbyOpening],["Depth",dims.cubbyDepth],["Rail H",dims.cubbyRailH]].map(function(item){
+                return h("div",{key:item[0],style:{background:"var(--input-bg)",borderRadius:8,padding:10,fontSize:12}},
+                  h("span",{style:{color:"var(--dim)"}},item[0]+": "),
+                  h("span",{style:{color:"var(--bright)",fontWeight:600}},fmtFrac(item[1])+"\"")
+                );
+              })
+            )
+          ),
+
+          // Cut List
+          h(Section,{title:"Cut List (Build Order)"},
+
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 1: Top & Bottom Frames"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
+              h(CutItem,{name:"Width Rails ("+frameName(true)+")",qty:dims.frameWidthRailCount,detail:fmtFrac(dims.frameWidthRailLength)+"\" each",note:"Front & back rails, both frames"}),
+              h(CutItem,{name:"Depth Rails ("+frameName(true)+")",qty:dims.frameDepthRailCount,detail:fmtFrac(dims.frameDepthRailLength)+"\" each",note:"Side rails, both frames"}),
+              dims.frameDividerCount > 0 ? h(CutItem,{name:"Frame Dividers ("+frameName(true)+")",qty:dims.frameDividerCount,detail:fmtFrac(dims.frameDividerLength)+"\" each",note:"Column dividers inside frames"}) : null
+            ),
+
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 2: Uprights (Pocket Holes)"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
+              h(CutItem,{name:"Vertical Uprights ("+frameName(true)+")",qty:dims.uprightCount,detail:fmtFrac(dims.uprightLength)+"\" each",note:"Connect top & bottom frames"})
+            ),
+
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 3: Shelf Rails"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
+              h(CutItem,{name:"Shelf Supports ("+(config.frameMaterial==="furring"?"1×2 furring":"1×2 common")+")",qty:dims.totalShelfRails,detail:fmtFrac(dims.shelfRailLength)+"\" each",note:"Bin rest rails inside cubbies"})
+            ),
+
+            (config.hasTop || config.hasBottomShelf) ? h("div",null,
+              h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 4: Surfaces"),
+              h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
+                config.hasTop ? h(CutItem,{name:'Top Surface (3/4" plywood)',qty:1,detail:fmtFrac(dims.topW)+"\" × "+fmtFrac(dims.topD)+"\"",note:"Work surface with overhang"}) : null,
+                config.hasBottomShelf ? h(CutItem,{name:'Bottom Shelf (3/4" plywood)',qty:1,detail:fmtFrac(dims.totalW)+"\" × "+fmtFrac(dims.totalD)+"\"",note:"Base platform"}) : null
+              )
+            ) : null,
+
+            // Shopping summary
+            h("div",{style:{padding:12,background:"var(--input-bg)",borderRadius:8,display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8,textAlign:"center"}},
+              h("div",null,
+                h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.frameTotal),
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},config.frameMaterial==="plywood"?"4×8 Ply (frame)":"8ft "+frameName(true)+"s")
+              ),
+              h("div",null,
+                h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.plywoodSheets),
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"4×8 Ply (top/shelf)")
+              ),
+              h("div",null,
+                h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.eightFtOneBys),
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"8ft 1×2s")
+              ),
+              h("div",null,
+                h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},dims.totalBins),
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"Totes needed")
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.render(h(App), document.getElementById("root"));
+</script>
