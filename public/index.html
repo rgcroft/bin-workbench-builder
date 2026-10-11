@@ -37,6 +37,12 @@
   @media (max-width: 800px) {
     .main-grid { grid-template-columns: 1fr !important; }
   }
+  @media print {
+    body { background: #fff !important; color: #000 !important; }
+    .no-print { display: none !important; }
+    .print-only { display: block !important; }
+  }
+  .print-only { display: none; }
 </style>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
@@ -184,6 +190,59 @@ function fmtFrac(n) {
   if (frac < 0.8125) return whole + " 3/4";
   if (frac < 0.9375) return whole + " 7/8";
   return "" + (whole + 1);
+}
+
+// ── SUPPLY LIST CALCULATOR ───────────────────────────────────
+function calculateSupplyList(config, dims) {
+  var frame = FRAME_MATERIALS[config.frameMaterial];
+
+  // Pocket screw counts per connection: 2 screws per end
+  var frameCornerScrews = 16; // 4 corners × 2 frames × 2 screws each
+  var dividerScrews = dims.frameDividerCount * 4; // 2 ends × 2 screws
+  var uprightScrews = dims.uprightCount * 4; // 2 ends × 2 screws
+  var framePocketTotal = frameCornerScrews + dividerScrews + uprightScrews;
+  var frameScrewLen = frame.thickness >= 1.5 ? '2-1/2"' : '1-1/4"';
+
+  var shelfRailScrews = dims.totalShelfRails * 4;
+  var shelfScrewLen = '1-1/4"';
+  var sameSize = frameScrewLen === shelfScrewLen;
+
+  function boxQty(n) {
+    if (n <= 50) return 50;
+    if (n <= 100) return 100;
+    if (n <= 250) return 250;
+    return Math.ceil(n / 100) * 100;
+  }
+
+  // Wood screws for plywood surfaces (every ~8" around perimeter + across joists)
+  var surfaceScrews = 0;
+  if (config.hasTop) surfaceScrews += Math.ceil((dims.topW + dims.topD) * 2 / 8) * 2 + config.cols * 4;
+  if (config.hasBottomShelf) surfaceScrews += Math.ceil((dims.totalW + dims.totalD) * 2 / 8) * 2 + config.cols * 4;
+
+  return {
+    frameLumber: dims.frameTotal,
+    frameLumberLabel: config.frameMaterial === "plywood"
+      ? '4×8 sheet' + (dims.frameTotal !== 1 ? 's' : '') + ' 3/4" plywood (rip into ' + frame.width + '" strips)'
+      : '8ft ' + frame.name + (dims.frameTotal !== 1 ? 's' : ''),
+    shelfRails: dims.eightFtOneBys,
+    shelfRailLabel: '8ft 1×2 common board' + (dims.eightFtOneBys !== 1 ? 's' : ''),
+    plywoodSheets: dims.plywoodSheets,
+    needsPlywood: config.hasTop || config.hasBottomShelf,
+    totes: dims.totalBins,
+    binName: BIN_PRESETS[config.binPreset] ? BIN_PRESETS[config.binPreset].name : 'Custom totes',
+    casters: config.hasWheels ? 4 : 0,
+    sameSize: sameSize,
+    frameScrewLen: frameScrewLen,
+    shelfScrewLen: shelfScrewLen,
+    framePocketTotal: framePocketTotal,
+    shelfRailScrews: shelfRailScrews,
+    combinedPocket: sameSize ? framePocketTotal + shelfRailScrews : 0,
+    combinedBox: sameSize ? boxQty(framePocketTotal + shelfRailScrews) : 0,
+    frameBox: boxQty(framePocketTotal),
+    shelfBox: boxQty(shelfRailScrews),
+    surfaceScrews: surfaceScrews,
+    surfaceBox: surfaceScrews > 0 ? boxQty(surfaceScrews) : 0,
+  };
 }
 
 // ── 3D PREVIEW ───────────────────────────────────────────────
@@ -351,6 +410,206 @@ function CutItem({ name, note, qty, detail }) {
   );
 }
 
+// ── SUPPLY LIST ITEM ────────────────────────────────────────
+function SupplyItem({ name, qty, detail, check }) {
+  return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--input-bg)",borderRadius:8}},
+    h("div",{style:{display:"flex",alignItems:"center",gap:8}},
+      check ? h("span",{style:{fontSize:14}},"☐") : null,
+      h("div",null,
+        h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},name),
+        detail ? h("div",{style:{fontSize:11,color:"var(--dim)"}},detail) : null
+      )
+    ),
+    h("div",{style:{fontSize:16,fontWeight:700,color:"var(--gold)",fontFamily:"monospace",flexShrink:0,marginLeft:12}},qty)
+  );
+}
+
+// ── BLUEPRINT ───────────────────────────────────────────────
+function Blueprint({ config, dims }) {
+  var cols = config.cols, rows = config.rows;
+  var ft = dims.frame.thickness;
+  var totalW = dims.totalW, totalD = dims.totalD;
+  var topW = config.hasTop ? dims.topW : totalW;
+  var topD = config.hasTop ? dims.topD : totalD;
+  var wheelH = config.hasWheels ? WHEEL_HEIGHT : 0;
+  var topH = config.hasTop ? PLYWOOD_THICKNESS : 0;
+  var bottomH = config.hasBottomShelf ? PLYWOOD_THICKNESS : 0;
+  var overallH = dims.totalH;
+
+  // ── FRONT ELEVATION ──
+  var margin = 55;
+  var drawW = 440;
+  var scaleF = Math.min(drawW / totalW, 220 / overallH);
+  var fW = totalW * scaleF, fH = overallH * scaleF;
+  var fOx = margin + (drawW - fW) / 2;
+  var fOy = margin / 2 + 10;
+
+  var fe = []; var k = 0;
+
+  // Wheels
+  if (config.hasWheels) {
+    var wh = wheelH * scaleF;
+    [ft * 2, totalW - ft * 2].forEach(function(wx) {
+      fe.push(h("circle",{key:k++,cx:fOx+wx*scaleF,cy:fOy+fH-wh/2,r:wh*0.35,fill:"#ccc",stroke:"#333",strokeWidth:0.75}));
+    });
+  }
+
+  // Bottom shelf
+  var baseY = fOy + fH - wheelH * scaleF;
+  if (config.hasBottomShelf) {
+    fe.push(h("rect",{key:k++,x:fOx,y:baseY-bottomH*scaleF,width:fW,height:bottomH*scaleF,fill:"#ddd",stroke:"#333",strokeWidth:0.75}));
+  }
+
+  // Cubby frame area
+  var cubbyBase = baseY - bottomH * scaleF;
+  var cubbyH = dims.cubbyAreaH * scaleF;
+  var cubbyTop = cubbyBase - cubbyH;
+  fe.push(h("rect",{key:k++,x:fOx,y:cubbyTop,width:fW,height:cubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
+
+  // Uprights
+  for (var c = 0; c <= cols; c++) {
+    var ux = fOx + c * (dims.cubbyOpening + ft) * scaleF;
+    fe.push(h("rect",{key:k++,x:ux,y:cubbyTop,width:ft*scaleF,height:cubbyH,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+  }
+
+  // Shelf rails
+  for (var r = 0; r <= rows; r++) {
+    var sy = cubbyTop + r * (dims.cubbyTotalH + SHELF_SUPPORT.width) * scaleF;
+    fe.push(h("rect",{key:k++,x:fOx,y:sy,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
+  }
+
+  // Bins (simplified)
+  for (var rr = 0; rr < rows; rr++) {
+    for (var cc = 0; cc < cols; cc++) {
+      var bx = fOx + (cc * (dims.cubbyOpening + ft) + ft) * scaleF + 2;
+      var by = cubbyTop + (rr * (dims.cubbyTotalH + SHELF_SUPPORT.width) + SHELF_SUPPORT.width) * scaleF + 2;
+      var bw = dims.cubbyOpening * scaleF - 4;
+      var bh = dims.cubbyTotalH * scaleF - 4;
+      fe.push(h("rect",{key:k++,x:bx,y:by,width:bw,height:bh,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
+    }
+  }
+
+  // Top surface
+  if (config.hasTop) {
+    var tsx = fOx - TOP_OVERHANG * scaleF;
+    var tsy = cubbyTop - topH * scaleF;
+    fe.push(h("rect",{key:k++,x:tsx,y:tsy,width:topW*scaleF,height:topH*scaleF,fill:"#ccc",stroke:"#333",strokeWidth:1}));
+  }
+
+  // ── DIMENSIONS ──
+  // Overall width
+  var dwy = fOy + fH + 16;
+  fe.push(h("line",{key:k++,x1:fOx,y1:fOy+fH+2,x2:fOx,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:fOx+fW,y1:fOy+fH+2,x2:fOx+fW,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:fOx,y1:dwy,x2:fOx+fW,y2:dwy,stroke:"#555",strokeWidth:0.75}));
+  fe.push(h("text",{key:k++,x:fOx+fW/2,y:dwy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(totalW)+'"'));
+
+  // Overall height
+  var dhx = fOx - 14;
+  var htop = config.hasTop ? cubbyTop - topH * scaleF : cubbyTop;
+  fe.push(h("line",{key:k++,x1:fOx-2,y1:htop,x2:dhx-4,y2:htop,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:fOx-2,y1:fOy+fH,x2:dhx-4,y2:fOy+fH,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:dhx,y1:htop,x2:dhx,y2:fOy+fH,stroke:"#555",strokeWidth:0.75}));
+  var hmy = (htop + fOy + fH) / 2;
+  fe.push(h("text",{key:k++,x:dhx-3,y:hmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(dhx-3)+","+hmy+")"},fmtFrac(overallH)+'"'));
+
+  // Cubby opening width (first cubby)
+  var cox1 = fOx + ft * scaleF;
+  var cox2 = cox1 + dims.cubbyOpening * scaleF;
+  var codY = cubbyTop - (config.hasTop ? topH * scaleF + 6 : 6);
+  fe.push(h("line",{key:k++,x1:cox1,y1:codY,x2:cox2,y2:codY,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:cox1,y1:cubbyTop,x2:cox1,y2:codY-2,stroke:"#bbb",strokeWidth:0.4}));
+  fe.push(h("line",{key:k++,x1:cox2,y1:cubbyTop,x2:cox2,y2:codY-2,stroke:"#bbb",strokeWidth:0.4}));
+  fe.push(h("text",{key:k++,x:(cox1+cox2)/2,y:codY-3,textAnchor:"middle",fontSize:8,fill:"#666",fontFamily:"monospace"},fmtFrac(dims.cubbyOpening)+'"'));
+
+  // Cubby height (first cubby)
+  var chy1 = cubbyTop + SHELF_SUPPORT.width * scaleF;
+  var chy2 = chy1 + dims.cubbyTotalH * scaleF;
+  var chx = fOx + fW + 12;
+  fe.push(h("line",{key:k++,x1:fOx+fW+2,y1:chy1,x2:chx+4,y2:chy1,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:fOx+fW+2,y1:chy2,x2:chx+4,y2:chy2,stroke:"#888",strokeWidth:0.5}));
+  fe.push(h("line",{key:k++,x1:chx,y1:chy1,x2:chx,y2:chy2,stroke:"#555",strokeWidth:0.75}));
+  var chmy = (chy1 + chy2) / 2;
+  fe.push(h("text",{key:k++,x:chx+3,y:chmy,textAnchor:"middle",fontSize:8,fill:"#666",fontFamily:"monospace",transform:"rotate(-90,"+(chx+3)+","+chmy+")"},fmtFrac(dims.cubbyTotalH)+'" cubby'));
+
+  var fSvgW = drawW + margin * 2 + 30;
+  var fSvgH = fH + margin + 36;
+
+  // ── TOP VIEW ──
+  var scaleT = Math.min(drawW / topW, 130 / topD);
+  var tW = topW * scaleT, tH = topD * scaleT;
+  var tOx = margin + (drawW - tW) / 2;
+  var tOy = 16;
+
+  var te = []; k = 0;
+
+  // Surface outline
+  te.push(h("rect",{key:k++,x:tOx,y:tOy,width:tW,height:tH,fill:"#eee",stroke:"#333",strokeWidth:1.5}));
+
+  // Frame outline (dashed) if overhang
+  if (config.hasTop) {
+    te.push(h("rect",{key:k++,x:tOx+TOP_OVERHANG*scaleT,y:tOy+TOP_OVERHANG*scaleT,width:totalW*scaleT,height:totalD*scaleT,fill:"none",stroke:"#999",strokeWidth:0.75,strokeDasharray:"4,2"}));
+  }
+
+  // Column dividers
+  var frameStartX = tOx + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
+  for (var ci = 0; ci <= cols; ci++) {
+    var lx = frameStartX + ci * (dims.cubbyOpening + ft) * scaleT;
+    var ly1 = tOy + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
+    var ly2 = ly1 + totalD * scaleT;
+    te.push(h("line",{key:k++,x1:lx,y1:ly1,x2:lx,y2:ly2,stroke:"#aaa",strokeWidth:ft*scaleT>1?ft*scaleT:0.75}));
+  }
+
+  // Width dimension
+  var twdy = tOy + tH + 14;
+  te.push(h("line",{key:k++,x1:tOx,y1:tOy+tH+2,x2:tOx,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
+  te.push(h("line",{key:k++,x1:tOx+tW,y1:tOy+tH+2,x2:tOx+tW,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
+  te.push(h("line",{key:k++,x1:tOx,y1:twdy,x2:tOx+tW,y2:twdy,stroke:"#555",strokeWidth:0.75}));
+  te.push(h("text",{key:k++,x:tOx+tW/2,y:twdy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(topW)+'"'));
+
+  // Depth dimension
+  var tddx = tOx - 14;
+  te.push(h("line",{key:k++,x1:tOx-2,y1:tOy,x2:tddx-4,y2:tOy,stroke:"#888",strokeWidth:0.5}));
+  te.push(h("line",{key:k++,x1:tOx-2,y1:tOy+tH,x2:tddx-4,y2:tOy+tH,stroke:"#888",strokeWidth:0.5}));
+  te.push(h("line",{key:k++,x1:tddx,y1:tOy,x2:tddx,y2:tOy+tH,stroke:"#555",strokeWidth:0.75}));
+  var tdmy = tOy + tH / 2;
+  te.push(h("text",{key:k++,x:tddx-3,y:tdmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(tddx-3)+","+tdmy+")"},fmtFrac(topD)+'"'));
+
+  var tSvgH = tH + 48;
+
+  // ── PRINT HANDLER ──
+  function handlePrint() {
+    var el = document.getElementById("blueprint-print-area");
+    var win = window.open("","_blank","width=800,height=600");
+    win.document.write('<!DOCTYPE html><html><head><title>Workbench Blueprint</title>');
+    win.document.write('<style>body{font-family:"Courier New",monospace;padding:24px;color:#222}h2{margin:0 0 4px}p{margin:0 0 16px;color:#555;font-size:13px}svg{display:block;margin:8px auto;border:1px solid #ccc;background:#fff;max-width:100%}.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#555;margin:16px 0 4px}</style>');
+    win.document.write('</head><body>');
+    win.document.write('<h2>Bin Workbench Blueprint</h2>');
+    win.document.write('<p>' + dims.totalBins + ' bins (' + cols + '×' + rows + ') — ' + FRAME_MATERIALS[config.frameMaterial].name + ' frame</p>');
+    var svgs = el.querySelectorAll("svg");
+    var labels = el.querySelectorAll(".bp-label");
+    for (var i = 0; i < svgs.length; i++) {
+      if (labels[i]) win.document.write('<div class="label">' + labels[i].textContent + '</div>');
+      win.document.write(svgs[i].outerHTML);
+    }
+    win.document.write('</body></html>');
+    win.document.close();
+    setTimeout(function(){ win.print(); }, 300);
+  }
+
+  return h("div",null,
+    h("div",{style:{display:"flex",gap:8,marginBottom:12}},
+      h("button",{onClick:handlePrint,style:{padding:"8px 16px",background:"var(--btn-bg)",color:"var(--gold)",border:"1px solid var(--border)",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",transition:"background 0.15s"}},"🖨 Print Blueprint")
+    ),
+    h("div",{id:"blueprint-print-area"},
+      h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Front Elevation"),
+      h("svg",{viewBox:"0 0 "+fSvgW+" "+fSvgH,style:{width:"100%",maxWidth:600,height:"auto",background:"#fff",borderRadius:8,border:"1px solid var(--border)"}},fe),
+      h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginTop:12,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Top View (Plan)"),
+      h("svg",{viewBox:"0 0 "+fSvgW+" "+tSvgH,style:{width:"100%",maxWidth:600,height:"auto",background:"#fff",borderRadius:8,border:"1px solid var(--border)"}},te)
+    )
+  );
+}
+
 // ── MAIN APP ─────────────────────────────────────────────────
 function App() {
   const [mode, setMode] = useState("manual");
@@ -372,6 +631,7 @@ function App() {
     return config;
   },[config,mode,fitResult]);
   const dims = useMemo(function(){ return calculateDimensions(activeConfig); },[activeConfig]);
+  const supplyList = useMemo(function(){ return calculateSupplyList(activeConfig, dims); },[activeConfig, dims]);
 
   var frameName = function(short) {
     if (config.frameMaterial==="2x4") return short ? "2×4" : "2×4 Lumber";
@@ -548,6 +808,44 @@ function App() {
                 h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"Totes needed")
               )
             )
+          ),
+
+          // Supply / Shopping List
+          h(Section,{title:"Shopping List"},
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Lumber"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:14}},
+              h(SupplyItem,{check:true,name:"Frame lumber",qty:supplyList.frameLumber,detail:supplyList.frameLumberLabel}),
+              h(SupplyItem,{check:true,name:"Shelf rail boards",qty:supplyList.shelfRails,detail:supplyList.shelfRailLabel}),
+              supplyList.needsPlywood ? h(SupplyItem,{check:true,name:'Surface plywood (3/4")',qty:supplyList.plywoodSheets,detail:"4×8 sheet"+(supplyList.plywoodSheets!==1?"s":"")+" — top & bottom"}) : null
+            ),
+
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Hardware"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:14}},
+              supplyList.sameSize
+                ? h(SupplyItem,{check:true,name:supplyList.frameScrewLen+" pocket hole screws",qty:"box of "+supplyList.combinedBox,detail:supplyList.combinedPocket+" needed (frames + shelf rails)"})
+                : h("div",null,
+                    h(SupplyItem,{check:true,name:supplyList.frameScrewLen+" pocket screws (frames)",qty:"box of "+supplyList.frameBox,detail:supplyList.framePocketTotal+" needed"}),
+                    h("div",{style:{height:5}}),
+                    h(SupplyItem,{check:true,name:supplyList.shelfScrewLen+" pocket screws (shelves)",qty:"box of "+supplyList.shelfBox,detail:supplyList.shelfRailScrews+" needed"})
+                  ),
+              supplyList.surfaceScrews > 0 ? h(SupplyItem,{check:true,name:'1-1/4" wood screws (plywood)',qty:"box of "+supplyList.surfaceBox,detail:supplyList.surfaceScrews+" needed for surfaces"}) : null,
+              h(SupplyItem,{check:true,name:"Wood glue",qty:"1",detail:"Titebond II or III"}),
+              supplyList.casters > 0 ? h(SupplyItem,{check:true,name:"Heavy-duty locking casters",qty:supplyList.casters,detail:'3" swivel, 2 locking + 2 fixed'}) : null
+            ),
+
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Bins"),
+            h("div",{style:{display:"flex",flexDirection:"column",gap:5}},
+              h(SupplyItem,{check:true,name:supplyList.binName,qty:supplyList.totes,detail:config.cols+"×"+config.rows+" grid"})
+            ),
+
+            h("div",{style:{marginTop:14,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:11,color:"var(--dim)",lineHeight:1.6}},
+              "Also recommended: pocket hole jig (Kreg K4/K5 or 720), drill/driver, speed square, miter saw or circular saw."
+            )
+          ),
+
+          // Blueprint
+          h(Section,{title:"Blueprint"},
+            h(Blueprint,{config:activeConfig,dims:dims})
           )
         )
       )
