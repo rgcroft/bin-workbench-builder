@@ -51,10 +51,12 @@
 <div id="root"></div>
 
 <script>
-const { useState, useMemo, useCallback, createElement: h } = React;
+var R = React;
+var h = R.createElement;
+var useState = R.useState, useMemo = R.useMemo, useCallback = R.useCallback, useEffect = R.useEffect, useRef = R.useRef;
 
 // ── MEASURED CUBBY DIMENSIONS ───────────────────────────────
-const CUBBY_DIMS = {
+var CUBBY_DIMS = {
   "12gal": {
     long:  { opening: 15,     depth: 20.25, railH: 12.625, totalH: 14.5 },
     short: { opening: 20.25,  depth: 15,    railH: 12.625, totalH: 14.5 },
@@ -65,122 +67,128 @@ const CUBBY_DIMS = {
   },
 };
 
-const BIN_PRESETS = {
-  "12gal": {
-    name: "12 Gallon (Greenmade/Costco)",
-    overallW: 14.875, overallD: 20.375, overallH: 14.625,
-    hangW: 13.875, hangD: 18.75, hangH: 12.5,
-  },
-  "27gal": {
-    name: "27 Gallon (Greenmade/Costco)",
-    overallW: 20, overallD: 30, overallH: 15,
-    hangW: 18, hangD: 28, hangH: 12.75,
-  },
-  custom: {
-    name: "Custom",
-    overallW: 15, overallD: 20, overallH: 15,
-    hangW: 14, hangD: 18.5, hangH: 12,
-  },
+var BIN_PRESETS = {
+  "12gal": { name: "12 Gal (Greenmade/Costco)", overallW: 14.875, overallD: 20.375, overallH: 14.625, hangW: 13.875, hangD: 18.75, hangH: 12.5 },
+  "27gal": { name: "27 Gal (Greenmade/Costco)", overallW: 20, overallD: 30, overallH: 15, hangW: 18, hangD: 28, hangH: 12.75 },
+  custom:  { name: "Custom", overallW: 15, overallD: 20, overallH: 15, hangW: 14, hangD: 18.5, hangH: 12 },
 };
 
-const CLEARANCE = 0.25;
-const FRAME_MATERIALS = {
-  "2x4":     { name: '2×4 Lumber',         thickness: 1.5,  width: 3.5 },
-  "plywood": { name: '3/4" Plywood Strips',     thickness: 0.75, width: 3.5 },
-  "furring": { name: 'Poplar 1×2 Furring',  thickness: 0.75, width: 1.5 },
+var CLEARANCE = 0.25;
+var FRAME_MATERIALS = {
+  "2x4":     { name: '2×4 Lumber',     thickness: 1.5,  width: 3.5 },
+  "plywood": { name: '3/4" Plywood Strips', thickness: 0.75, width: 3.5 },
+  "furring": { name: 'Poplar 1×2 Furring', thickness: 0.75, width: 1.5 },
 };
-const SHELF_SUPPORT = { name: '1×2 Common Board', thickness: 0.75, width: 1.5 };
-const PLYWOOD_THICKNESS = 0.75;
-const WHEEL_HEIGHT = 3;
-const TOP_OVERHANG = 1.5;
+var SHELF_SUPPORT = { name: '1×2 Common Board', thickness: 0.75, width: 1.5 };
+var PLYWOOD_THICKNESS = 0.75;
+var WHEEL_HEIGHT = 3;
+var TOP_OVERHANG = 1.5;
 
 // ── CALCULATIONS ─────────────────────────────────────────────
-function calculateDimensions(config) {
-  const { cols, rows, slideOut, hasWheels, hasTop, hasBottomShelf, binPreset, frameMaterial, customBin } = config;
-  const frame = FRAME_MATERIALS[frameMaterial];
-  const orient = slideOut === "long" ? "long" : "short";
-
-  let cubbyOpening, cubbyDepth, cubbyRailH, cubbyTotalH;
-  if (binPreset !== "custom" && CUBBY_DIMS[binPreset]) {
-    const cd = CUBBY_DIMS[binPreset][orient];
-    cubbyOpening = cd.opening; cubbyDepth = cd.depth;
+function getRowCubby(rc, orient, customBin) {
+  var cubbyOpening, singleDepth, cubbyRailH, cubbyTotalH;
+  if (rc.binPreset !== "custom" && CUBBY_DIMS[rc.binPreset]) {
+    var cd = CUBBY_DIMS[rc.binPreset][orient];
+    cubbyOpening = cd.opening; singleDepth = cd.depth;
     cubbyRailH = cd.railH; cubbyTotalH = cd.totalH;
   } else {
-    const bin = customBin;
-    cubbyOpening = orient === "long" ? bin.hangW + CLEARANCE * 2 : bin.hangD + CLEARANCE * 2;
-    cubbyDepth = orient === "long" ? bin.overallD + CLEARANCE * 2 : bin.overallW + CLEARANCE * 2;
-    cubbyRailH = bin.hangH + CLEARANCE;
-    cubbyTotalH = bin.overallH + CLEARANCE;
+    cubbyOpening = orient === "long" ? customBin.hangW + CLEARANCE * 2 : customBin.hangD + CLEARANCE * 2;
+    singleDepth = orient === "long" ? customBin.overallD + CLEARANCE * 2 : customBin.overallW + CLEARANCE * 2;
+    cubbyRailH = customBin.hangH + CLEARANCE;
+    cubbyTotalH = customBin.overallH + CLEARANCE;
   }
-
-  const frameW = cols * cubbyOpening + (cols + 1) * frame.thickness;
-  const cubbyAreaH = rows * cubbyTotalH + (rows + 1) * SHELF_SUPPORT.width;
-  const frameD = cubbyDepth + frame.thickness * 2;
-  const totalW = frameW;
-  const totalH = cubbyAreaH + (hasWheels ? WHEEL_HEIGHT : 0) + (hasTop ? PLYWOOD_THICKNESS : 0) + (hasBottomShelf ? PLYWOOD_THICKNESS : 0);
-  const totalD = frameD;
-  const topW = hasTop ? totalW + TOP_OVERHANG * 2 : totalW;
-  const topD = hasTop ? totalD + TOP_OVERHANG * 2 : totalD;
-  const totalBins = cols * rows;
-
-  // Cut list
-  const frameWidthRailCount = 4;
-  const frameWidthRailLength = totalW;
-  const frameDepthRailCount = 4;
-  const frameDepthRailLength = totalD - frame.thickness * 2;
-  const frameDividerCount = (cols - 1) * 2;
-  const frameDividerLength = frameDepthRailLength;
-  const uprightCount = (cols + 1) * 2;
-  const uprightLength = cubbyAreaH;
-  const shelfLevelCount = rows + 1;
-  const shelfRailsPerLevel = cols * 2;
-  const totalShelfRails = shelfLevelCount * shelfRailsPerLevel;
-  const shelfRailLength = frameDepthRailLength;
-
-  const plywoodSheets = Math.ceil(((hasTop ? topW * topD : 0) + (hasBottomShelf ? totalW * totalD : 0)) / (48 * 96));
-  const allFramePieces = frameWidthRailCount * frameWidthRailLength + frameDepthRailCount * frameDepthRailLength + frameDividerCount * frameDividerLength + uprightCount * uprightLength;
-  let frameTotal;
-  if (frameMaterial === "plywood") {
-    frameTotal = Math.ceil((allFramePieces * frame.width) / (48 * 96));
-  } else {
-    frameTotal = Math.ceil(allFramePieces / 96);
-  }
-  const eightFtOneBys = Math.ceil((totalShelfRails * shelfRailLength) / 96);
-
-  return {
-    totalW, totalH, totalD, topW, topD, frameW, cubbyAreaH, frameD,
-    cubbyOpening, cubbyDepth, cubbyRailH, cubbyTotalH,
-    totalBins, plywoodSheets, frameTotal, eightFtOneBys,
-    frameMaterial, frame,
-    frameWidthRailCount, frameWidthRailLength,
-    frameDepthRailCount, frameDepthRailLength,
-    frameDividerCount, frameDividerLength,
-    uprightCount, uprightLength, totalShelfRails, shelfRailLength,
-  };
+  return { cubbyOpening: cubbyOpening, singleDepth: singleDepth, cubbyRailH: cubbyRailH, cubbyTotalH: cubbyTotalH };
 }
 
-function fitToSpace(spaceW, spaceD, spaceH, config) {
-  const frame = FRAME_MATERIALS[config.frameMaterial];
-  const orient = config.slideOut === "long" ? "long" : "short";
-  let cubbyOpening, cubbyTotalH;
-  if (config.binPreset !== "custom" && CUBBY_DIMS[config.binPreset]) {
-    const cd = CUBBY_DIMS[config.binPreset][orient];
-    cubbyOpening = cd.opening; cubbyTotalH = cd.totalH;
-  } else {
-    const bin = config.customBin;
-    cubbyOpening = orient === "long" ? bin.hangW + CLEARANCE * 2 : bin.hangD + CLEARANCE * 2;
-    cubbyTotalH = bin.overallH + CLEARANCE;
+function calculateDimensions(config) {
+  var frame = FRAME_MATERIALS[config.frameMaterial];
+  var orient = config.slideOut === "long" ? "long" : "short";
+
+  var perRow = config.rowConfigs.map(function(rc) {
+    var cd = getRowCubby(rc, orient, config.customBin);
+    var binsDeep = rc.binsDeep || 1;
+    var cubbyDepth = cd.singleDepth * binsDeep;
+    var rowW = rc.cols * cd.cubbyOpening + (rc.cols + 1) * frame.thickness;
+    return {
+      cubbyOpening: cd.cubbyOpening, cubbyDepth: cubbyDepth, singleDepth: cd.singleDepth,
+      cubbyRailH: cd.cubbyRailH, cubbyTotalH: cd.cubbyTotalH,
+      cols: rc.cols, binsDeep: binsDeep, binPreset: rc.binPreset, rowW: rowW,
+      yOffset: 0
+    };
+  });
+
+  var rows = perRow.length;
+  var y = 0;
+  for (var i = 0; i < rows; i++) {
+    y += SHELF_SUPPORT.width;
+    perRow[i].yOffset = y;
+    y += perRow[i].cubbyTotalH;
   }
-  const availH = spaceH - (config.hasWheels ? WHEEL_HEIGHT : 0) - (config.hasTop ? PLYWOOD_THICKNESS : 0) - (config.hasBottomShelf ? PLYWOOD_THICKNESS : 0);
-  const maxCols = Math.floor((spaceW - frame.thickness) / (cubbyOpening + frame.thickness));
-  const maxRows = Math.floor((availH - SHELF_SUPPORT.width) / (cubbyTotalH + SHELF_SUPPORT.width));
-  return { maxCols: Math.max(1, maxCols), maxRows: Math.max(1, maxRows) };
+  y += SHELF_SUPPORT.width;
+  var cubbyAreaH = y;
+
+  var maxRowW = 0, maxCubbyDepth = 0, maxCols = 0;
+  for (var i = 0; i < rows; i++) {
+    if (perRow[i].rowW > maxRowW) maxRowW = perRow[i].rowW;
+    if (perRow[i].cubbyDepth > maxCubbyDepth) maxCubbyDepth = perRow[i].cubbyDepth;
+    if (perRow[i].cols > maxCols) maxCols = perRow[i].cols;
+  }
+
+  var totalW = maxRowW;
+  var totalD = maxCubbyDepth + frame.thickness * 2;
+  var totalH = cubbyAreaH + (config.hasWheels ? WHEEL_HEIGHT : 0) + (config.hasTop ? PLYWOOD_THICKNESS : 0) + (config.hasBottomShelf ? PLYWOOD_THICKNESS : 0);
+  var topW = config.hasTop ? totalW + TOP_OVERHANG * 2 : totalW;
+  var topD = config.hasTop ? totalD + TOP_OVERHANG * 2 : totalD;
+  var totalBins = 0;
+  for (var i = 0; i < rows; i++) totalBins += perRow[i].cols * perRow[i].binsDeep;
+
+  // Cut list
+  var frameWidthRailCount = 4;
+  var frameWidthRailLength = totalW;
+  var frameDepthRailCount = 4;
+  var frameDepthRailLength = totalD - frame.thickness * 2;
+  var frameDividerCount = maxCols > 1 ? (maxCols - 1) * 2 : 0;
+  var frameDividerLength = frameDepthRailLength;
+  var uprightCount = (maxCols + 1) * 2;
+  var uprightLength = cubbyAreaH;
+  var totalShelfRails = 0;
+  for (var lvl = 0; lvl <= rows; lvl++) {
+    var lvlCols;
+    if (lvl === 0) lvlCols = perRow[0].cols;
+    else if (lvl === rows) lvlCols = perRow[rows - 1].cols;
+    else lvlCols = Math.max(perRow[lvl - 1].cols, perRow[lvl].cols);
+    totalShelfRails += lvlCols * 2;
+  }
+  var shelfRailLength = frameDepthRailLength;
+
+  var plywoodSheets = Math.ceil(((config.hasTop ? topW * topD : 0) + (config.hasBottomShelf ? totalW * totalD : 0)) / (48 * 96));
+  var allFrameIn = frameWidthRailCount * frameWidthRailLength + frameDepthRailCount * frameDepthRailLength + frameDividerCount * frameDividerLength + uprightCount * uprightLength;
+  var frameTotal;
+  if (config.frameMaterial === "plywood") {
+    frameTotal = Math.ceil((allFrameIn * frame.width) / (48 * 96));
+  } else {
+    frameTotal = Math.ceil(allFrameIn / 96);
+  }
+  var eightFtOneBys = Math.ceil((totalShelfRails * shelfRailLength) / 96);
+
+  return {
+    totalW: totalW, totalH: totalH, totalD: totalD, topW: topW, topD: topD,
+    cubbyAreaH: cubbyAreaH, totalBins: totalBins,
+    plywoodSheets: plywoodSheets, frameTotal: frameTotal, eightFtOneBys: eightFtOneBys,
+    frameMaterial: config.frameMaterial, frame: frame,
+    frameWidthRailCount: frameWidthRailCount, frameWidthRailLength: frameWidthRailLength,
+    frameDepthRailCount: frameDepthRailCount, frameDepthRailLength: frameDepthRailLength,
+    frameDividerCount: frameDividerCount, frameDividerLength: frameDividerLength,
+    uprightCount: uprightCount, uprightLength: uprightLength,
+    totalShelfRails: totalShelfRails, shelfRailLength: shelfRailLength,
+    perRow: perRow, rows: rows, maxCols: maxCols, maxCubbyDepth: maxCubbyDepth,
+  };
 }
 
 // ── FRACTION FORMATTER ───────────────────────────────────────
 function fmtFrac(n) {
-  const whole = Math.floor(n);
-  const frac = n - whole;
+  var whole = Math.floor(n);
+  var frac = n - whole;
   if (frac < 0.0625) return "" + whole;
   if (frac < 0.1875) return whole + " 1/8";
   if (frac < 0.3125) return whole + " 1/4";
@@ -195,29 +203,31 @@ function fmtFrac(n) {
 // ── SUPPLY LIST CALCULATOR ───────────────────────────────────
 function calculateSupplyList(config, dims) {
   var frame = FRAME_MATERIALS[config.frameMaterial];
-
-  // Pocket screw counts per connection: 2 screws per end
-  var frameCornerScrews = 16; // 4 corners × 2 frames × 2 screws each
-  var dividerScrews = dims.frameDividerCount * 4; // 2 ends × 2 screws
-  var uprightScrews = dims.uprightCount * 4; // 2 ends × 2 screws
+  var frameCornerScrews = 16;
+  var dividerScrews = dims.frameDividerCount * 4;
+  var uprightScrews = dims.uprightCount * 4;
   var framePocketTotal = frameCornerScrews + dividerScrews + uprightScrews;
   var frameScrewLen = frame.thickness >= 1.5 ? '2-1/2"' : '1-1/4"';
-
   var shelfRailScrews = dims.totalShelfRails * 4;
   var shelfScrewLen = '1-1/4"';
   var sameSize = frameScrewLen === shelfScrewLen;
-
   function boxQty(n) {
     if (n <= 50) return 50;
     if (n <= 100) return 100;
     if (n <= 250) return 250;
     return Math.ceil(n / 100) * 100;
   }
-
-  // Wood screws for plywood surfaces (every ~8" around perimeter + across joists)
   var surfaceScrews = 0;
-  if (config.hasTop) surfaceScrews += Math.ceil((dims.topW + dims.topD) * 2 / 8) * 2 + config.cols * 4;
-  if (config.hasBottomShelf) surfaceScrews += Math.ceil((dims.totalW + dims.totalD) * 2 / 8) * 2 + config.cols * 4;
+  if (config.hasTop) surfaceScrews += Math.ceil((dims.topW + dims.topD) * 2 / 8) * 2 + dims.maxCols * 4;
+  if (config.hasBottomShelf) surfaceScrews += Math.ceil((dims.totalW + dims.totalD) * 2 / 8) * 2 + dims.maxCols * 4;
+
+  // Build bin summary per preset
+  var binCounts = {};
+  dims.perRow.forEach(function(r) {
+    var key = r.binPreset;
+    if (!binCounts[key]) binCounts[key] = 0;
+    binCounts[key] += r.cols * r.binsDeep;
+  });
 
   return {
     frameLumber: dims.frameTotal,
@@ -229,7 +239,7 @@ function calculateSupplyList(config, dims) {
     plywoodSheets: dims.plywoodSheets,
     needsPlywood: config.hasTop || config.hasBottomShelf,
     totes: dims.totalBins,
-    binName: BIN_PRESETS[config.binPreset] ? BIN_PRESETS[config.binPreset].name : 'Custom totes',
+    binCounts: binCounts,
     casters: config.hasWheels ? 4 : 0,
     sameSize: sameSize,
     frameScrewLen: frameScrewLen,
@@ -245,21 +255,87 @@ function calculateSupplyList(config, dims) {
   };
 }
 
-// ── 3D PREVIEW ───────────────────────────────────────────────
-function WorkbenchPreview({ config, dims }) {
-  var maxW = Math.max(dims.topW || 0, dims.totalW);
-  var sc = Math.min(
-    340 / (maxW + dims.totalD * 0.5),
-    220 / (dims.totalH + dims.totalD * 0.3)
-  );
-  var depthShiftX = dims.totalD * sc * 0.5;
-  var depthShiftY = dims.totalD * sc * 0.28;
-  var ox = 30, oy = depthShiftY + 16;
+// ── 3D ROTATING PREVIEW ─────────────────────────────────────
+function WorkbenchPreview(props) {
+  var config = props.config, dims = props.dims;
+  var angleState = useState(-0.55);
+  var angle = angleState[0], setAngle = angleState[1];
+  var spinState = useState(true);
+  var spinning = spinState[0], setSpinning = spinState[1];
+  var dragState = useState(null);
+  var dragStart = dragState[0], setDragStart = dragState[1];
+  var frameRef = useRef();
+  var svgRef = useRef();
 
-  // Isometric: x right, y up, z into screen (upper-right)
-  function px(x,y,z){return ox+x*sc+z*sc*0.5}
-  function py(x,y,z){return oy+(dims.totalH-y)*sc-z*sc*0.28}
-  function pt(x,y,z){return px(x,y,z)+","+py(x,y,z)}
+  // Auto-rotate
+  useEffect(function() {
+    if (!spinning) return;
+    var last = 0;
+    function tick(t) {
+      if (last) setAngle(function(a) { return a - (t - last) * 0.0004; });
+      last = t;
+      frameRef.current = requestAnimationFrame(tick);
+    }
+    frameRef.current = requestAnimationFrame(tick);
+    return function() { cancelAnimationFrame(frameRef.current); };
+  }, [spinning]);
+
+  // Drag to rotate
+  var onPointerDown = useCallback(function(e) {
+    setSpinning(false);
+    setDragStart({ x: e.clientX, a: angle });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }, [angle]);
+  var onPointerMove = useCallback(function(e) {
+    if (!dragStart) return;
+    var dx = e.clientX - dragStart.x;
+    setAngle(dragStart.a + dx * 0.008);
+  }, [dragStart]);
+  var onPointerUp = useCallback(function() { setDragStart(null); }, []);
+  var onDoubleClick = useCallback(function() { setSpinning(true); }, []);
+
+  // Projection setup
+  var cosA = Math.cos(angle), sinA = Math.sin(angle);
+  var tilt = 0.38;
+  var totalW = dims.totalW, totalH = dims.totalH, totalD = dims.totalD;
+  var perRow = dims.perRow, rows = dims.rows;
+  var ft = dims.frame.thickness;
+  var hasWheels = config.hasWheels, hasTop = config.hasTop, hasBottomShelf = config.hasBottomShelf;
+
+  // Compute scale to fit
+  var corners = [
+    [0,0,0],[totalW,0,0],[0,totalH,0],[totalW,totalH,0],
+    [0,0,totalD],[totalW,0,totalD],[0,totalH,totalD],[totalW,totalH,totalD]
+  ];
+  if (hasTop) {
+    var ov = TOP_OVERHANG;
+    corners.push([-ov,totalH,-ov],[totalW+ov,totalH,-ov],[-ov,totalH,totalD+ov],[totalW+ov,totalH,totalD+ov]);
+  }
+  var minPX = 1e9, maxPX = -1e9, minPY = 1e9, maxPY = -1e9;
+  corners.forEach(function(c) {
+    var sx = c[0] * cosA - c[2] * sinA;
+    var sy = -c[1] + (c[0] * sinA + c[2] * cosA) * tilt;
+    if (sx < minPX) minPX = sx;
+    if (sx > maxPX) maxPX = sx;
+    if (sy < minPY) minPY = sy;
+    if (sy > maxPY) maxPY = sy;
+  });
+  var rangeX = maxPX - minPX || 1, rangeY = maxPY - minPY || 1;
+  var targetW = 500, targetH = 320;
+  var sc = Math.min(targetW / rangeX, targetH / rangeY) * 0.82;
+  var pad = 30;
+  var ox = pad - minPX * sc;
+  var oy = pad - minPY * sc;
+  var svgW = rangeX * sc + pad * 2;
+  var svgH = rangeY * sc + pad * 2;
+
+  function px(x,y,z) { return ox + (x * cosA - z * sinA) * sc; }
+  function py(x,y,z) { return oy + (-y + (x * sinA + z * cosA) * tilt) * sc; }
+  function pt(x,y,z) { return px(x,y,z) + "," + py(x,y,z); }
+
+  // Face visibility
+  var showFront = cosA > 0;
+  var showRight = sinA < 0;
 
   var matColors = {
     "2x4":     { face: "#c4a265", top: "#d4b87a", side: "#a8894f" },
@@ -267,120 +343,159 @@ function WorkbenchPreview({ config, dims }) {
     "furring": { face: "#d4b07a", top: "#e0c490", side: "#b89060" },
   };
   var mc = matColors[dims.frameMaterial] || matColors["2x4"];
-  var cols=config.cols, rows=config.rows;
-  var hasWheels=config.hasWheels, hasTop=config.hasTop, hasBottomShelf=config.hasBottomShelf;
-  var cubbyOpening=dims.cubbyOpening, cubbyDepth=dims.cubbyDepth, cubbyTotalH=dims.cubbyTotalH;
-  var ft = dims.frame.thickness;
-  var els = [];
-  var key = 0;
+
+  // Collect all 3D boxes, sort by depth, then draw
+  var boxes = [];
   var baseY = hasWheels ? WHEEL_HEIGHT : 0;
   var shelfBase = baseY + (hasBottomShelf ? PLYWOOD_THICKNESS : 0);
 
-  // Helper: 3D box with front, top, and right-side faces
-  function box(bx,by,bz,bw,bh,bd,fCol,tCol,sCol,str){
-    str=str||"#00000025";
-    // Right side face (drawn first, behind front)
-    if(sCol){
-      var s=[pt(bx+bw,by,bz),pt(bx+bw,by,bz+bd),pt(bx+bw,by+bh,bz+bd),pt(bx+bw,by+bh,bz)].join(" ");
-      els.push(h("polygon",{key:key++,points:s,fill:sCol,stroke:str,strokeWidth:0.5}));
-    }
-    // Front face
-    var f=[pt(bx,by,bz),pt(bx+bw,by,bz),pt(bx+bw,by+bh,bz),pt(bx,by+bh,bz)].join(" ");
-    els.push(h("polygon",{key:key++,points:f,fill:fCol,stroke:str,strokeWidth:0.5}));
-    // Top face
-    if(tCol){
-      var t=[pt(bx,by+bh,bz),pt(bx+bw,by+bh,bz),pt(bx+bw,by+bh,bz+bd),pt(bx,by+bh,bz+bd)].join(" ");
-      els.push(h("polygon",{key:key++,points:t,fill:tCol,stroke:str,strokeWidth:0.5}));
-    }
+  function addBox(bx,by,bz,bw,bh,bd,fCol,tCol,sCol,type) {
+    var cx = bx + bw / 2, cy = by + bh / 2, cz = bz + bd / 2;
+    var depth = cx * sinA + cz * cosA;
+    boxes.push({ x:bx,y:by,z:bz,w:bw,h:bh,d:bd,fc:fCol,tc:tCol,sc:sCol,depth:depth,type:type||"" });
   }
 
-  // Wheels (draw back pair first, then front)
-  if(hasWheels){
-    var wh=WHEEL_HEIGHT;
-    var wPositions=[[ft*2,dims.totalD-ft*2],[dims.totalW-ft*2,dims.totalD-ft*2],[ft*2,ft*2],[dims.totalW-ft*2,ft*2]];
-    wPositions.forEach(function(p){
-      els.push(h("ellipse",{key:key++,cx:px(p[0],wh*0.5,p[1]),cy:py(p[0],wh*0.5,p[1]),rx:wh*sc*0.4,ry:wh*sc*0.2,fill:"#444",stroke:"#222",strokeWidth:1}));
-      els.push(h("ellipse",{key:key++,cx:px(p[0],wh*0.35,p[1]),cy:py(p[0],wh*0.35,p[1]),rx:wh*sc*0.22,ry:wh*sc*0.12,fill:"#666",stroke:"#555",strokeWidth:0.5}));
-    });
+  // Wheels
+  if (hasWheels) {
+    addBox(ft, 0, ft, ft, WHEEL_HEIGHT, ft, "#555", "#666", "#444", "wheel");
+    addBox(totalW-ft*2, 0, ft, ft, WHEEL_HEIGHT, ft, "#555", "#666", "#444", "wheel");
+    addBox(ft, 0, totalD-ft*2, ft, WHEEL_HEIGHT, ft, "#555", "#666", "#444", "wheel");
+    addBox(totalW-ft*2, 0, totalD-ft*2, ft, WHEEL_HEIGHT, ft, "#555", "#666", "#444", "wheel");
   }
 
   // Bottom shelf
-  if(hasBottomShelf){
-    box(0,baseY,0,dims.totalW,PLYWOOD_THICKNESS,dims.totalD,mc.side,mc.top,mc.face,"#00000030");
+  if (hasBottomShelf) {
+    addBox(0, baseY, 0, totalW, PLYWOOD_THICKNESS, totalD, mc.side, mc.top, mc.face, "shelf");
   }
 
-  // Back uprights (drawn first so front overlaps them)
-  for(var c=0;c<=cols;c++){
-    var ux=c*(cubbyOpening+ft);
-    box(ux,shelfBase,dims.totalD-ft,ft,dims.cubbyAreaH,ft, mc.side,null,null,"#00000020");
+  // Uprights - use maxCols for the outer frame
+  for (var c = 0; c <= dims.maxCols; c++) {
+    // Use the widest row's spacing for uprights
+    var widestRow = perRow[0]; for (var rr = 1; rr < rows; rr++) { if (perRow[rr].rowW > widestRow.rowW) widestRow = perRow[rr]; }
+    var ux = c * (widestRow.cubbyOpening + ft);
+    if (ux + ft > totalW) ux = totalW - ft;
+    // Front upright
+    addBox(ux, shelfBase, 0, ft, dims.cubbyAreaH, ft, mc.face, mc.top, mc.side, "upright");
+    // Back upright
+    addBox(ux, shelfBase, totalD - ft, ft, dims.cubbyAreaH, ft, mc.face, mc.top, mc.side, "upright");
   }
 
-  // Cross-members (front-to-back rails at each shelf level, per column)
-  for(var r=0;r<=rows;r++){
-    var ry=shelfBase+r*(cubbyTotalH+SHELF_SUPPORT.width);
-    for(var c=0;c<=cols;c++){
-      var cx=c*(cubbyOpening+ft);
-      // depth rail connecting front to back
-      var rail=[pt(cx+ft*0.3,ry+SHELF_SUPPORT.width*0.5,0),pt(cx+ft*0.7,ry+SHELF_SUPPORT.width*0.5,0),pt(cx+ft*0.7,ry+SHELF_SUPPORT.width*0.5,dims.totalD),pt(cx+ft*0.3,ry+SHELF_SUPPORT.width*0.5,dims.totalD)].join(" ");
-      els.push(h("polygon",{key:key++,points:rail,fill:mc.side,stroke:"#00000015",strokeWidth:0.5,opacity:0.35}));
+  // Per-row: shelf rails and bins
+  for (var ri = 0; ri < rows; ri++) {
+    var row = perRow[ri];
+    var rowYBase = shelfBase + row.yOffset;
+    var rowXOffset = (totalW - row.rowW) / 2; // center narrower rows
+
+    // Shelf rails at bottom of this row
+    var railY = rowYBase - SHELF_SUPPORT.width;
+    addBox(rowXOffset, railY, 0, row.rowW, SHELF_SUPPORT.width, ft * 0.5, "#b8a070", "#c8b488", "#9a8560", "rail");
+
+    // Shelf rails at top of this row (only for last row)
+    if (ri === rows - 1) {
+      var topRailY = rowYBase + row.cubbyTotalH;
+      addBox(rowXOffset, topRailY, 0, row.rowW, SHELF_SUPPORT.width, ft * 0.5, "#b8a070", "#c8b488", "#9a8560", "rail");
     }
-  }
 
-  // Bins (back-to-front not needed since they're all at same z, but draw bottom rows first)
-  for(var r=0;r<rows;r++){
-    for(var c=0;c<cols;c++){
-      var bx=c*(cubbyOpening+ft)+ft;
-      var by=shelfBase+SHELF_SUPPORT.width+r*(cubbyTotalH+SHELF_SUPPORT.width);
-      var bz=ft;
-      var bd=cubbyDepth-ft;
-      var bodyH=cubbyTotalH*0.82;
-      var lidH=cubbyTotalH-bodyH;
-      // Bin body
-      box(bx,by,bz,cubbyOpening,bodyH,bd,"#2a2d2e","#333","#222","#1a1d1e40");
-      // Lid
-      box(bx,by+bodyH,bz,cubbyOpening,lidH,bd,"#e8b710","#f0c420","#c99e0e","#b8900e60");
+    // Cross-member depth rails (subtle)
+    for (var cc = 0; cc <= row.cols; cc++) {
+      var cmx = rowXOffset + cc * (row.cubbyOpening + ft);
+      addBox(cmx + ft * 0.25, railY + SHELF_SUPPORT.width * 0.25, ft, ft * 0.5, SHELF_SUPPORT.width * 0.5, totalD - ft * 2, mc.side, null, null, "crossmember");
     }
-  }
 
-  // Front uprights (drawn after bins so they overlap)
-  for(var c=0;c<=cols;c++){
-    var ux=c*(cubbyOpening+ft);
-    box(ux,shelfBase,0,ft,dims.cubbyAreaH,ft, mc.face,mc.top,mc.side,"#00000030");
-  }
-
-  // Front shelf rails
-  for(var r=0;r<=rows;r++){
-    var ry=shelfBase+r*(cubbyTotalH+SHELF_SUPPORT.width);
-    box(0,ry,0,dims.totalW,SHELF_SUPPORT.width,ft*0.5, "#b8a070","#c8b488","#9a8560","#00000025");
+    // Bins
+    for (var cc = 0; cc < row.cols; cc++) {
+      var binX = rowXOffset + cc * (row.cubbyOpening + ft) + ft;
+      for (var dd = 0; dd < row.binsDeep; dd++) {
+        var binZ = ft + dd * row.singleDepth;
+        var binD = row.singleDepth - (dd === row.binsDeep - 1 ? ft : 0.5);
+        var bodyH = row.cubbyTotalH * 0.82;
+        var lidH = row.cubbyTotalH - bodyH;
+        addBox(binX, rowYBase, binZ, row.cubbyOpening, bodyH, binD, "#2a2d2e", "#333", "#222", "bin");
+        addBox(binX, rowYBase + bodyH, binZ, row.cubbyOpening, lidH, binD, "#e8b710", "#f0c420", "#c99e0e", "lid");
+      }
+    }
   }
 
   // Top surface
-  if(hasTop){
-    var topY=shelfBase+dims.cubbyAreaH;
-    var ov=TOP_OVERHANG;
-    box(-ov,topY,-ov,dims.totalW+ov*2,PLYWOOD_THICKNESS,dims.totalD+ov*2, mc.face,mc.top,mc.side,"#00000030");
+  if (hasTop) {
+    var topY = shelfBase + dims.cubbyAreaH;
+    var ov = TOP_OVERHANG;
+    addBox(-ov, topY, -ov, totalW + ov * 2, PLYWOOD_THICKNESS, totalD + ov * 2, mc.face, mc.top, mc.side, "top");
   }
 
-  var svgW=Math.max(500, maxW*sc + depthShiftX + 80);
-  var svgH=Math.max(280, (dims.totalH)*sc + depthShiftY + 50);
+  // Sort by depth (farthest first)
+  boxes.sort(function(a, b) { return b.depth - a.depth; });
 
-  return h("svg",{viewBox:"0 0 "+svgW+" "+svgH,style:{width:"100%",maxWidth:640,height:"auto"}},
-    h("defs",null,h("linearGradient",{id:"bgGrad",x1:0,y1:0,x2:0,y2:1},h("stop",{offset:"0%",stopColor:"#1a2332"}),h("stop",{offset:"100%",stopColor:"#0d1520"}))),
-    h("rect",{width:svgW,height:svgH,fill:"url(#bgGrad)",rx:8}),
-    els
+  // Draw
+  var els = [];
+  var key = 0;
+  var str = "#00000025";
+  boxes.forEach(function(b) {
+    // For each box, draw visible faces in back-to-front order
+    var f, t, s, pts;
+
+    // Back face (if front is hidden, back is visible)
+    if (!showFront) {
+      pts = [pt(b.x,b.y,b.z+b.d),pt(b.x+b.w,b.y,b.z+b.d),pt(b.x+b.w,b.y+b.h,b.z+b.d),pt(b.x,b.y+b.h,b.z+b.d)].join(" ");
+      els.push(h("polygon",{key:key++,points:pts,fill:b.fc,stroke:str,strokeWidth:0.5}));
+    }
+
+    // Left side (visible when sinA > 0)
+    if (sinA > 0 && b.sc) {
+      pts = [pt(b.x,b.y,b.z),pt(b.x,b.y,b.z+b.d),pt(b.x,b.y+b.h,b.z+b.d),pt(b.x,b.y+b.h,b.z)].join(" ");
+      els.push(h("polygon",{key:key++,points:pts,fill:b.sc,stroke:str,strokeWidth:0.5}));
+    }
+
+    // Right side (visible when sinA < 0)
+    if (showRight && b.sc) {
+      pts = [pt(b.x+b.w,b.y,b.z),pt(b.x+b.w,b.y,b.z+b.d),pt(b.x+b.w,b.y+b.h,b.z+b.d),pt(b.x+b.w,b.y+b.h,b.z)].join(" ");
+      els.push(h("polygon",{key:key++,points:pts,fill:b.sc,stroke:str,strokeWidth:0.5}));
+    }
+
+    // Front face
+    if (showFront) {
+      pts = [pt(b.x,b.y,b.z),pt(b.x+b.w,b.y,b.z),pt(b.x+b.w,b.y+b.h,b.z),pt(b.x,b.y+b.h,b.z)].join(" ");
+      els.push(h("polygon",{key:key++,points:pts,fill:b.fc,stroke:str,strokeWidth:0.5}));
+    }
+
+    // Top face
+    if (b.tc) {
+      pts = [pt(b.x,b.y+b.h,b.z),pt(b.x+b.w,b.y+b.h,b.z),pt(b.x+b.w,b.y+b.h,b.z+b.d),pt(b.x,b.y+b.h,b.z+b.d)].join(" ");
+      els.push(h("polygon",{key:key++,points:pts,fill:b.tc,stroke:str,strokeWidth:0.5}));
+    }
+  });
+
+  return h("div",{style:{position:"relative"}},
+    h("svg",{
+      ref: svgRef,
+      viewBox: "0 0 " + svgW + " " + svgH,
+      style: { width: "100%", maxWidth: 640, height: "auto", cursor: dragStart ? "grabbing" : "grab", userSelect: "none", touchAction: "none" },
+      onPointerDown: onPointerDown,
+      onPointerMove: onPointerMove,
+      onPointerUp: onPointerUp,
+      onDoubleClick: onDoubleClick,
+    },
+      h("defs",null,h("linearGradient",{id:"bgGrad",x1:0,y1:0,x2:0,y2:1},h("stop",{offset:"0%",stopColor:"#1a2332"}),h("stop",{offset:"100%",stopColor:"#0d1520"}))),
+      h("rect",{width:svgW,height:svgH,fill:"url(#bgGrad)",rx:8}),
+      els
+    ),
+    h("div",{style:{position:"absolute",bottom:8,right:8,fontSize:10,color:"var(--dim)",pointerEvents:"none"}},
+      spinning ? "drag to rotate" : "double-click to spin"
+    )
   );
 }
 
 // ── UI COMPONENTS ────────────────────────────────────────────
-function NumberInput({ label, value, onChange, min, max, step, unit }) {
-  step = step || 1;
-  const [localValue, setLocalValue] = useState(String(value));
-  const handleChange = function(e) {
+function NumberInput(props) {
+  var label=props.label,value=props.value,onChange=props.onChange,min=props.min,max=props.max,step=props.step||1,unit=props.unit;
+  var lv = useState(String(value));
+  var localValue = lv[0], setLocalValue = lv[1];
+  var handleChange = function(e) {
     var raw = e.target.value; setLocalValue(raw);
     var num = parseFloat(raw);
     if (!isNaN(num) && num >= min && num <= max) onChange(num);
   };
-  const handleBlur = function() {
+  var handleBlur = function() {
     var num = parseFloat(localValue);
     if (isNaN(num) || num < min) { onChange(min); setLocalValue(String(min)); }
     else if (num > max) { onChange(max); setLocalValue(String(max)); }
@@ -395,18 +510,22 @@ function NumberInput({ label, value, onChange, min, max, step, unit }) {
   );
 }
 
-function Stepper({ label, value, onChange, min, max }) {
-  return h("div",{style:{display:"flex",flexDirection:"column",gap:4}},
-    h("label",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",textTransform:"uppercase",letterSpacing:"0.05em"}},label),
+function Stepper(props) {
+  var label=props.label,value=props.value,onChange=props.onChange,min=props.min,max=props.max,compact=props.compact;
+  var h1 = compact ? 28 : 36, w1 = compact ? 28 : 36, w2 = compact ? 32 : 44;
+  var fs = compact ? 14 : 16;
+  return h("div",{style:{display:"flex",flexDirection:"column",gap:compact?2:4}},
+    label ? h("label",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",textTransform:"uppercase",letterSpacing:"0.05em"}},label) : null,
     h("div",{style:{display:"flex",alignItems:"center",gap:0}},
-      h("button",{onClick:function(){onChange(Math.max(min,value-1))},style:{width:36,height:36,border:"1px solid var(--border)",borderRadius:"6px 0 0 6px",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value<=min?"not-allowed":"pointer",opacity:value<=min?0.4:1}},"-"),
-      h("div",{style:{width:44,height:36,display:"flex",alignItems:"center",justifyContent:"center",background:"var(--input-bg)",borderTop:"1px solid var(--border)",borderBottom:"1px solid var(--border)",color:"var(--text)",fontSize:16,fontWeight:700,fontFamily:"monospace"}},value),
-      h("button",{onClick:function(){onChange(Math.min(max,value+1))},style:{width:36,height:36,border:"1px solid var(--border)",borderRadius:"0 6px 6px 0",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value>=max?"not-allowed":"pointer",opacity:value>=max?0.4:1}},"+")
+      h("button",{onClick:function(){onChange(Math.max(min,value-1))},style:{width:w1,height:h1,border:"1px solid var(--border)",borderRadius:"6px 0 0 6px",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value<=min?"not-allowed":"pointer",opacity:value<=min?0.4:1}},"-"),
+      h("div",{style:{width:w2,height:h1,display:"flex",alignItems:"center",justifyContent:"center",background:"var(--input-bg)",borderTop:"1px solid var(--border)",borderBottom:"1px solid var(--border)",color:"var(--text)",fontSize:fs,fontWeight:700,fontFamily:"monospace"}},value),
+      h("button",{onClick:function(){onChange(Math.min(max,value+1))},style:{width:w1,height:h1,border:"1px solid var(--border)",borderRadius:"0 6px 6px 0",background:"var(--btn-bg)",color:"var(--gold)",fontSize:18,fontWeight:700,cursor:value>=max?"not-allowed":"pointer",opacity:value>=max?0.4:1}},"+")
     )
   );
 }
 
-function Toggle({ label, checked, onChange }) {
+function Toggle(props) {
+  var label=props.label,checked=props.checked,onChange=props.onChange;
   return h("label",{style:{display:"flex",alignItems:"center",gap:10,cursor:"pointer",userSelect:"none"}},
     h("div",{onClick:function(){onChange(!checked)},style:{width:40,height:22,borderRadius:11,position:"relative",background:checked?"var(--gold)":"var(--border)",transition:"background 0.2s",cursor:"pointer",flexShrink:0}},
       h("div",{style:{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:2,left:checked?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.3)"}})
@@ -415,52 +534,85 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
-function Section({ title, children }) {
+function Section(props) {
   return h("div",{style:{background:"var(--bg2)",borderRadius:12,padding:16,border:"1px solid var(--border)"}},
-    h("div",{style:{fontSize:12,fontWeight:700,color:"var(--gold)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:12}},title),
-    children
+    h("div",{style:{fontSize:12,fontWeight:700,color:"var(--gold)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:12}},props.title),
+    props.children
   );
 }
 
-function OptionButtons({ options, value, onChange }) {
+function OptionButtons(props) {
+  var options=props.options,value=props.value,onChange=props.onChange;
   return h("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
     options.map(function(opt){
-      return h("button",{key:opt[0],onClick:function(){onChange(opt[0])},style:{flex:1,minWidth:90,padding:"10px 8px",borderRadius:8,border:value===opt[0]?"1px solid var(--btn-border)":"1px solid transparent",background:value===opt[0]?"var(--btn-active)":"var(--btn-bg)",color:value===opt[0]?"var(--gold)":"var(--mid)",fontWeight:600,fontSize:12,cursor:"pointer",transition:"all 0.15s"}},opt[1]);
+      return h("button",{key:opt[0],onClick:function(){onChange(opt[0])},style:{flex:1,minWidth:70,padding:"10px 8px",borderRadius:8,border:value===opt[0]?"1px solid var(--btn-border)":"1px solid transparent",background:value===opt[0]?"var(--btn-active)":"var(--btn-bg)",color:value===opt[0]?"var(--gold)":"var(--mid)",fontWeight:600,fontSize:12,cursor:"pointer",transition:"all 0.15s"}},opt[1]);
     })
   );
 }
 
-// ── CUT LIST ITEM ────────────────────────────────────────────
-function CutItem({ name, note, qty, detail }) {
+function CutItem(props) {
   return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--input-bg)",borderRadius:8}},
     h("div",null,
-      h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},name),
-      note ? h("div",{style:{fontSize:11,color:"var(--dim)"}},note) : null
+      h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},props.name),
+      props.note ? h("div",{style:{fontSize:11,color:"var(--dim)"}},props.note) : null
     ),
     h("div",{style:{textAlign:"right",flexShrink:0,marginLeft:12}},
-      h("div",{style:{fontSize:14,fontWeight:700,color:"var(--gold)",fontFamily:"monospace"}},"×"+qty),
-      h("div",{style:{fontSize:11,color:"var(--dim)"}},detail)
+      h("div",{style:{fontSize:14,fontWeight:700,color:"var(--gold)",fontFamily:"monospace"}},"×"+props.qty),
+      h("div",{style:{fontSize:11,color:"var(--dim)"}},props.detail)
     )
   );
 }
 
-// ── SUPPLY LIST ITEM ────────────────────────────────────────
-function SupplyItem({ name, qty, detail, check }) {
+function SupplyItem(props) {
   return h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",background:"var(--input-bg)",borderRadius:8}},
     h("div",{style:{display:"flex",alignItems:"center",gap:8}},
-      check ? h("span",{style:{fontSize:14}},"☐") : null,
+      props.check ? h("span",{style:{fontSize:14}},"☐") : null,
       h("div",null,
-        h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},name),
-        detail ? h("div",{style:{fontSize:11,color:"var(--dim)"}},detail) : null
+        h("div",{style:{fontSize:13,color:"var(--bright)",fontWeight:600}},props.name),
+        props.detail ? h("div",{style:{fontSize:11,color:"var(--dim)"}},props.detail) : null
       )
     ),
-    h("div",{style:{fontSize:16,fontWeight:700,color:"var(--gold)",fontFamily:"monospace",flexShrink:0,marginLeft:12}},qty)
+    h("div",{style:{fontSize:16,fontWeight:700,color:"var(--gold)",fontFamily:"monospace",flexShrink:0,marginLeft:12}},props.qty)
+  );
+}
+
+// ── ROW CONFIG CARD ─────────────────────────────────────────
+function RowConfigCard(props) {
+  var ri = props.index, rc = props.rowConfig, onChange = props.onChange, total = props.total;
+  return h("div",{style:{padding:10,background:"var(--input-bg)",borderRadius:8,border:"1px solid var(--border)"}},
+    h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:8}},"ROW " + (ri + 1) + (total > 1 ? " (from bottom)" : "")),
+    h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end"}},
+      // Bin size
+      h("div",{style:{flex:"1 1 100px"}},
+        h("label",{style:{fontSize:10,fontWeight:600,color:"var(--dim)",textTransform:"uppercase",display:"block",marginBottom:3}},"Bin Size"),
+        h("div",{style:{display:"flex",gap:4}},
+          ["12gal","27gal"].map(function(bp) {
+            var active = rc.binPreset === bp;
+            return h("button",{key:bp,onClick:function(){onChange({binPreset:bp})},style:{
+              flex:1,padding:"6px 4px",borderRadius:6,fontSize:11,fontWeight:600,cursor:"pointer",
+              border:active?"1px solid var(--btn-border)":"1px solid transparent",
+              background:active?"var(--btn-active)":"var(--btn-bg)",
+              color:active?"var(--gold)":"var(--mid)",
+            }},bp==="12gal"?"12 Gal":"27 Gal");
+          })
+        )
+      ),
+      // Cols
+      h("div",null,
+        h(Stepper,{label:"Cols",value:rc.cols,onChange:function(v){onChange({cols:v})},min:1,max:10,compact:true})
+      ),
+      // Deep
+      h("div",null,
+        h(Stepper,{label:"Deep",value:rc.binsDeep||1,onChange:function(v){onChange({binsDeep:v})},min:1,max:4,compact:true})
+      )
+    )
   );
 }
 
 // ── BLUEPRINT ───────────────────────────────────────────────
-function Blueprint({ config, dims }) {
-  var cols = config.cols, rows = config.rows;
+function Blueprint(props) {
+  var config = props.config, dims = props.dims;
+  var perRow = dims.perRow, rows = dims.rows;
   var ft = dims.frame.thickness;
   var totalW = dims.totalW, totalD = dims.totalD;
   var topW = config.hasTop ? dims.topW : totalW;
@@ -471,14 +623,14 @@ function Blueprint({ config, dims }) {
   var overallH = dims.totalH;
 
   // ── FRONT ELEVATION ──
-  var margin = 55;
-  var drawW = 440;
+  var margin = 55, drawW = 440;
   var scaleF = Math.min(drawW / totalW, 220 / overallH);
   var fW = totalW * scaleF, fH = overallH * scaleF;
   var fOx = margin + (drawW - fW) / 2;
   var fOy = margin / 2 + 10;
-
-  var fe = []; var k = 0;
+  var fe = [], k = 0;
+  var baseY = fOy + fH - wheelH * scaleF;
+  var shelfBase = baseY;
 
   // Wheels
   if (config.hasWheels) {
@@ -489,37 +641,47 @@ function Blueprint({ config, dims }) {
   }
 
   // Bottom shelf
-  var baseY = fOy + fH - wheelH * scaleF;
   if (config.hasBottomShelf) {
     fe.push(h("rect",{key:k++,x:fOx,y:baseY-bottomH*scaleF,width:fW,height:bottomH*scaleF,fill:"#ddd",stroke:"#333",strokeWidth:0.75}));
+    shelfBase = baseY - bottomH * scaleF;
   }
 
   // Cubby frame area
-  var cubbyBase = baseY - bottomH * scaleF;
   var cubbyH = dims.cubbyAreaH * scaleF;
-  var cubbyTop = cubbyBase - cubbyH;
+  var cubbyTop = shelfBase - cubbyH;
   fe.push(h("rect",{key:k++,x:fOx,y:cubbyTop,width:fW,height:cubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
 
-  // Uprights
-  for (var c = 0; c <= cols; c++) {
-    var ux = fOx + c * (dims.cubbyOpening + ft) * scaleF;
-    fe.push(h("rect",{key:k++,x:ux,y:cubbyTop,width:ft*scaleF,height:cubbyH,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
-  }
+  // Per-row: uprights, shelf rails, bins
+  for (var ri = 0; ri < rows; ri++) {
+    var row = perRow[ri];
+    var rowXOffset = (totalW - row.rowW) / 2;
+    var rowYTop = cubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyTotalH) * scaleF;
 
-  // Shelf rails
-  for (var r = 0; r <= rows; r++) {
-    var sy = cubbyTop + r * (dims.cubbyTotalH + SHELF_SUPPORT.width) * scaleF;
-    fe.push(h("rect",{key:k++,x:fOx,y:sy,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
-  }
+    // Shelf rail below this row
+    var railYBot = cubbyTop + (dims.cubbyAreaH - row.yOffset) * scaleF;
+    fe.push(h("rect",{key:k++,x:fOx+rowXOffset*scaleF,y:railYBot,width:row.rowW*scaleF,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
 
-  // Bins (simplified)
-  for (var rr = 0; rr < rows; rr++) {
-    for (var cc = 0; cc < cols; cc++) {
-      var bx = fOx + (cc * (dims.cubbyOpening + ft) + ft) * scaleF + 2;
-      var by = cubbyTop + (rr * (dims.cubbyTotalH + SHELF_SUPPORT.width) + SHELF_SUPPORT.width) * scaleF + 2;
-      var bw = dims.cubbyOpening * scaleF - 4;
-      var bh = dims.cubbyTotalH * scaleF - 4;
+    // Uprights for this row
+    for (var cc = 0; cc <= row.cols; cc++) {
+      var ux = rowXOffset + cc * (row.cubbyOpening + ft);
+      fe.push(h("rect",{key:k++,x:fOx+ux*scaleF,y:rowYTop,width:ft*scaleF,height:(row.cubbyTotalH+SHELF_SUPPORT.width)*scaleF,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    }
+
+    // Bins
+    for (var cc = 0; cc < row.cols; cc++) {
+      var bx = fOx + (rowXOffset + cc * (row.cubbyOpening + ft) + ft) * scaleF + 2;
+      var by = rowYTop + 2;
+      var bw = row.cubbyOpening * scaleF - 4;
+      var bh = row.cubbyTotalH * scaleF - 4;
       fe.push(h("rect",{key:k++,x:bx,y:by,width:bw,height:bh,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
+      if (row.binsDeep > 1) {
+        fe.push(h("text",{key:k++,x:bx+bw/2,y:by+bh/2+4,textAnchor:"middle",fontSize:9,fill:"#999",fontFamily:"monospace"},row.binsDeep+" deep"));
+      }
+    }
+
+    // Top shelf rail (only for last row)
+    if (ri === rows - 1) {
+      fe.push(h("rect",{key:k++,x:fOx,y:cubbyTop,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
     }
   }
 
@@ -530,15 +692,13 @@ function Blueprint({ config, dims }) {
     fe.push(h("rect",{key:k++,x:tsx,y:tsy,width:topW*scaleF,height:topH*scaleF,fill:"#ccc",stroke:"#333",strokeWidth:1}));
   }
 
-  // ── DIMENSIONS ──
-  // Overall width
+  // Dimensions
   var dwy = fOy + fH + 16;
   fe.push(h("line",{key:k++,x1:fOx,y1:fOy+fH+2,x2:fOx,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
   fe.push(h("line",{key:k++,x1:fOx+fW,y1:fOy+fH+2,x2:fOx+fW,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
   fe.push(h("line",{key:k++,x1:fOx,y1:dwy,x2:fOx+fW,y2:dwy,stroke:"#555",strokeWidth:0.75}));
   fe.push(h("text",{key:k++,x:fOx+fW/2,y:dwy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(totalW)+'"'));
 
-  // Overall height
   var dhx = fOx - 14;
   var htop = config.hasTop ? cubbyTop - topH * scaleF : cubbyTop;
   fe.push(h("line",{key:k++,x1:fOx-2,y1:htop,x2:dhx-4,y2:htop,stroke:"#888",strokeWidth:0.5}));
@@ -546,25 +706,6 @@ function Blueprint({ config, dims }) {
   fe.push(h("line",{key:k++,x1:dhx,y1:htop,x2:dhx,y2:fOy+fH,stroke:"#555",strokeWidth:0.75}));
   var hmy = (htop + fOy + fH) / 2;
   fe.push(h("text",{key:k++,x:dhx-3,y:hmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(dhx-3)+","+hmy+")"},fmtFrac(overallH)+'"'));
-
-  // Cubby opening width (first cubby)
-  var cox1 = fOx + ft * scaleF;
-  var cox2 = cox1 + dims.cubbyOpening * scaleF;
-  var codY = cubbyTop - (config.hasTop ? topH * scaleF + 6 : 6);
-  fe.push(h("line",{key:k++,x1:cox1,y1:codY,x2:cox2,y2:codY,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:cox1,y1:cubbyTop,x2:cox1,y2:codY-2,stroke:"#bbb",strokeWidth:0.4}));
-  fe.push(h("line",{key:k++,x1:cox2,y1:cubbyTop,x2:cox2,y2:codY-2,stroke:"#bbb",strokeWidth:0.4}));
-  fe.push(h("text",{key:k++,x:(cox1+cox2)/2,y:codY-3,textAnchor:"middle",fontSize:8,fill:"#666",fontFamily:"monospace"},fmtFrac(dims.cubbyOpening)+'"'));
-
-  // Cubby height (first cubby)
-  var chy1 = cubbyTop + SHELF_SUPPORT.width * scaleF;
-  var chy2 = chy1 + dims.cubbyTotalH * scaleF;
-  var chx = fOx + fW + 12;
-  fe.push(h("line",{key:k++,x1:fOx+fW+2,y1:chy1,x2:chx+4,y2:chy1,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:fOx+fW+2,y1:chy2,x2:chx+4,y2:chy2,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:chx,y1:chy1,x2:chx,y2:chy2,stroke:"#555",strokeWidth:0.75}));
-  var chmy = (chy1 + chy2) / 2;
-  fe.push(h("text",{key:k++,x:chx+3,y:chmy,textAnchor:"middle",fontSize:8,fill:"#666",fontFamily:"monospace",transform:"rotate(-90,"+(chx+3)+","+chmy+")"},fmtFrac(dims.cubbyTotalH)+'" cubby'));
 
   var fSvgW = drawW + margin * 2 + 30;
   var fSvgH = fH + margin + 36;
@@ -574,33 +715,29 @@ function Blueprint({ config, dims }) {
   var tW = topW * scaleT, tH = topD * scaleT;
   var tOx = margin + (drawW - tW) / 2;
   var tOy = 16;
-
   var te = []; k = 0;
-
-  // Surface outline
   te.push(h("rect",{key:k++,x:tOx,y:tOy,width:tW,height:tH,fill:"#eee",stroke:"#333",strokeWidth:1.5}));
-
-  // Frame outline (dashed) if overhang
   if (config.hasTop) {
     te.push(h("rect",{key:k++,x:tOx+TOP_OVERHANG*scaleT,y:tOy+TOP_OVERHANG*scaleT,width:totalW*scaleT,height:totalD*scaleT,fill:"none",stroke:"#999",strokeWidth:0.75,strokeDasharray:"4,2"}));
   }
-
-  // Column dividers
-  var frameStartX = tOx + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
-  for (var ci = 0; ci <= cols; ci++) {
-    var lx = frameStartX + ci * (dims.cubbyOpening + ft) * scaleT;
-    var ly1 = tOy + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
-    var ly2 = ly1 + totalD * scaleT;
-    te.push(h("line",{key:k++,x1:lx,y1:ly1,x2:lx,y2:ly2,stroke:"#aaa",strokeWidth:ft*scaleT>1?ft*scaleT:0.75}));
+  // Column dividers for each row (shown in top view)
+  for (var ri = 0; ri < rows; ri++) {
+    var row = perRow[ri];
+    var rowXOff = (totalW - row.rowW) / 2;
+    var fsx = tOx + (config.hasTop ? TOP_OVERHANG * scaleT : 0) + rowXOff * scaleT;
+    for (var ci = 0; ci <= row.cols; ci++) {
+      var lx = fsx + ci * (row.cubbyOpening + ft) * scaleT;
+      var ly1 = tOy + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
+      var ly2 = ly1 + totalD * scaleT;
+      te.push(h("line",{key:k++,x1:lx,y1:ly1,x2:lx,y2:ly2,stroke:"#aaa",strokeWidth:ft*scaleT>1?ft*scaleT:0.75,opacity:0.6}));
+    }
   }
-
   // Width dimension
   var twdy = tOy + tH + 14;
   te.push(h("line",{key:k++,x1:tOx,y1:tOy+tH+2,x2:tOx,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
   te.push(h("line",{key:k++,x1:tOx+tW,y1:tOy+tH+2,x2:tOx+tW,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
   te.push(h("line",{key:k++,x1:tOx,y1:twdy,x2:tOx+tW,y2:twdy,stroke:"#555",strokeWidth:0.75}));
   te.push(h("text",{key:k++,x:tOx+tW/2,y:twdy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(topW)+'"'));
-
   // Depth dimension
   var tddx = tOx - 14;
   te.push(h("line",{key:k++,x1:tOx-2,y1:tOy,x2:tddx-4,y2:tOy,stroke:"#888",strokeWidth:0.5}));
@@ -608,10 +745,8 @@ function Blueprint({ config, dims }) {
   te.push(h("line",{key:k++,x1:tddx,y1:tOy,x2:tddx,y2:tOy+tH,stroke:"#555",strokeWidth:0.75}));
   var tdmy = tOy + tH / 2;
   te.push(h("text",{key:k++,x:tddx-3,y:tdmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(tddx-3)+","+tdmy+")"},fmtFrac(topD)+'"'));
-
   var tSvgH = tH + 48;
 
-  // ── PRINT HANDLER ──
   function handlePrint() {
     var el = document.getElementById("blueprint-print-area");
     var win = window.open("","_blank","width=800,height=600");
@@ -619,7 +754,7 @@ function Blueprint({ config, dims }) {
     win.document.write('<style>body{font-family:"Courier New",monospace;padding:24px;color:#222}h2{margin:0 0 4px}p{margin:0 0 16px;color:#555;font-size:13px}svg{display:block;margin:8px auto;border:1px solid #ccc;background:#fff;max-width:100%}.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#555;margin:16px 0 4px}</style>');
     win.document.write('</head><body>');
     win.document.write('<h2>Bin Workbench Blueprint</h2>');
-    win.document.write('<p>' + dims.totalBins + ' bins (' + cols + '×' + rows + ') — ' + FRAME_MATERIALS[config.frameMaterial].name + ' frame</p>');
+    win.document.write('<p>' + dims.totalBins + ' bins — ' + rows + ' row' + (rows>1?'s':'') + ' — ' + FRAME_MATERIALS[config.frameMaterial].name + ' frame</p>');
     var svgs = el.querySelectorAll("svg");
     var labels = el.querySelectorAll(".bp-label");
     for (var i = 0; i < svgs.length; i++) {
@@ -633,7 +768,7 @@ function Blueprint({ config, dims }) {
 
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-      h("button",{onClick:handlePrint,style:{padding:"8px 16px",background:"var(--btn-bg)",color:"var(--gold)",border:"1px solid var(--border)",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",transition:"background 0.15s"}},"🖨 Print Blueprint")
+      h("button",{onClick:handlePrint,style:{padding:"8px 16px",background:"var(--btn-bg)",color:"var(--gold)",border:"1px solid var(--border)",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}},"🖨 Print Blueprint")
     ),
     h("div",{id:"blueprint-print-area"},
       h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Front Elevation"),
@@ -646,39 +781,80 @@ function Blueprint({ config, dims }) {
 
 // ── MAIN APP ─────────────────────────────────────────────────
 function App() {
-  const [mode, setMode] = useState("manual");
-  const [config, setConfig] = useState({
-    cols:4, rows:2, slideOut:"long", hasWheels:true, hasTop:true, hasBottomShelf:true,
-    binPreset:"12gal", frameMaterial:"2x4",
+  var configState = useState({
+    rowConfigs: [
+      { binPreset: "12gal", cols: 4, binsDeep: 1 },
+      { binPreset: "12gal", cols: 4, binsDeep: 1 },
+    ],
+    slideOut: "long",
+    frameMaterial: "2x4",
+    hasTop: true, hasBottomShelf: true, hasWheels: true,
     customBin: { overallW:15, overallD:20, overallH:15, hangW:14, hangD:18.5, hangH:12 },
   });
-  const [spaceW, setSpaceW] = useState(96);
-  const [spaceD, setSpaceD] = useState(30);
-  const [spaceH, setSpaceH] = useState(42);
+  var config = configState[0], setConfig = configState[1];
 
-  const update = useCallback(function(key,val){ setConfig(function(p){ return Object.assign({},p,{[key]:val}); }); },[]);
-  const updateCustomBin = useCallback(function(key,val){ setConfig(function(p){ return Object.assign({},p,{customBin:Object.assign({},p.customBin,{[key]:val})}); }); },[]);
+  var update = useCallback(function(key,val) {
+    setConfig(function(p) { var n = {}; for (var k in p) n[k] = p[k]; n[key] = val; return n; });
+  },[]);
 
-  const fitResult = useMemo(function(){ return mode==="fitToSpace" ? fitToSpace(spaceW,spaceD,spaceH,config) : null; },[mode,spaceW,spaceD,spaceH,config]);
-  const activeConfig = useMemo(function(){
-    if (mode==="fitToSpace" && fitResult) return Object.assign({},config,{cols:fitResult.maxCols,rows:fitResult.maxRows});
-    return config;
-  },[config,mode,fitResult]);
-  const dims = useMemo(function(){ return calculateDimensions(activeConfig); },[activeConfig]);
-  const supplyList = useMemo(function(){ return calculateSupplyList(activeConfig, dims); },[activeConfig, dims]);
+  var updateRow = useCallback(function(index, changes) {
+    setConfig(function(p) {
+      var newRows = p.rowConfigs.map(function(r, i) {
+        if (i !== index) return r;
+        var n = {}; for (var k in r) n[k] = r[k]; for (var k in changes) n[k] = changes[k]; return n;
+      });
+      var n = {}; for (var k in p) n[k] = p[k]; n.rowConfigs = newRows; return n;
+    });
+  },[]);
 
+  var setRowCount = useCallback(function(count) {
+    setConfig(function(p) {
+      var cur = p.rowConfigs;
+      var newRows;
+      if (count > cur.length) {
+        newRows = cur.slice();
+        var last = cur[cur.length - 1];
+        for (var i = cur.length; i < count; i++) {
+          newRows.push({ binPreset: last.binPreset, cols: last.cols, binsDeep: last.binsDeep });
+        }
+      } else {
+        newRows = cur.slice(0, count);
+      }
+      var n = {}; for (var k in p) n[k] = p[k]; n.rowConfigs = newRows; return n;
+    });
+  },[]);
+
+  var updateCustomBin = useCallback(function(key,val) {
+    setConfig(function(p) {
+      var cb = {}; for (var k in p.customBin) cb[k] = p.customBin[k]; cb[key] = val;
+      var n = {}; for (var k in p) n[k] = p[k]; n.customBin = cb; return n;
+    });
+  },[]);
+
+  var dims = useMemo(function(){ return calculateDimensions(config); },[config]);
+  var supplyList = useMemo(function(){ return calculateSupplyList(config, dims); },[config, dims]);
+
+  var rows = config.rowConfigs.length;
   var frameName = function(short) {
     if (config.frameMaterial==="2x4") return short ? "2×4" : "2×4 Lumber";
     if (config.frameMaterial==="plywood") return short ? '3/4" ply' : '3/4" Plywood Strips';
     return short ? "1×2 furring" : "Poplar 1×2 Furring";
   };
-  var sagWarning = config.frameMaterial === "furring" && dims.cubbyOpening > 18;
-  var orientLabel = config.slideOut === "long" ? "Long" : "Short";
+  var sagWarning = config.frameMaterial === "furring" && dims.perRow.some(function(r){ return r.cubbyOpening > 18; });
+
+  // Build a bin summary string
+  var binSummary = [];
+  var binCounts = supplyList.binCounts;
+  for (var bp in binCounts) {
+    if (binCounts[bp] > 0) {
+      var name = BIN_PRESETS[bp] ? BIN_PRESETS[bp].name : "Custom";
+      binSummary.push(binCounts[bp] + " × " + name);
+    }
+  }
 
   return h("div",{style:{minHeight:"100vh",background:"var(--bg)",color:"var(--text)",fontFamily:"'Segoe UI', -apple-system, sans-serif",padding:"20px 16px"}},
-
-    // Header
     h("div",{style:{maxWidth:1140,margin:"0 auto"}},
+      // Header
       h("div",{style:{marginBottom:24}},
         h("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:4}},
           h("div",{style:{width:36,height:36,borderRadius:8,background:"linear-gradient(135deg, var(--gold), #c99e0e)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:800}},"⚙"),
@@ -692,59 +868,24 @@ function App() {
         // ── LEFT PANEL ──
         h("div",{style:{display:"flex",flexDirection:"column",gap:14,minWidth:0}},
 
-          h(Section,{title:"Build Mode"},
-            h(OptionButtons,{options:[["manual","Manual Layout"],["fitToSpace","Fit to Space"]],value:mode,onChange:setMode})
-          ),
-
-          mode === "fitToSpace" ? h(Section,{title:"Available Space"},
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}},
-              h(NumberInput,{label:"Width",value:spaceW,onChange:setSpaceW,min:20,max:240,unit:"in"}),
-              h(NumberInput,{label:"Depth",value:spaceD,onChange:setSpaceD,min:20,max:60,unit:"in"}),
-              h(NumberInput,{label:"Height",value:spaceH,onChange:setSpaceH,min:20,max:80,unit:"in"})
+          // Row configuration
+          h(Section,{title:"Rows"},
+            h("div",{style:{marginBottom:12}},
+              h(Stepper,{label:"Number of Rows",value:rows,onChange:setRowCount,min:1,max:6})
             ),
-            fitResult ? h("div",{style:{marginTop:12,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:13,color:"var(--green)",fontFamily:"monospace"}},
-              "Best fit: ",h("strong",null,fitResult.maxCols+"×"+fitResult.maxRows)," (",fitResult.maxCols*fitResult.maxRows," bins)"
-            ) : null
-          ) : null,
-
-          mode === "manual" ? h(Section,{title:"Grid Layout"},
-            h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
-              h(Stepper,{label:"Columns",value:config.cols,onChange:function(v){update("cols",v)},min:1,max:10}),
-              h(Stepper,{label:"Rows",value:config.rows,onChange:function(v){update("rows",v)},min:1,max:6})
+            h("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+              config.rowConfigs.map(function(rc, i) {
+                return h(RowConfigCard,{key:i,index:i,rowConfig:rc,total:rows,onChange:function(changes){updateRow(i,changes)}});
+              })
             )
-          ) : null,
-
-          h(Section,{title:"Bin Size"},
-            h(OptionButtons,{options:[["12gal","12 Gallon"],["27gal","27 Gallon"],["custom","Custom"]],value:config.binPreset,onChange:function(v){update("binPreset",v)}}),
-            config.binPreset !== "custom" ? h("div",{style:{marginTop:10,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:12,color:"var(--mid)"}},
-              h("div",{style:{marginBottom:4,fontWeight:600,color:"var(--bright)"}},BIN_PRESETS[config.binPreset].name),
-              h("div",{style:{fontSize:11,color:"var(--dim)",marginBottom:6}},"Measured cubby dimensions:"),
-              h("div",null,"Opening: "+fmtFrac(dims.cubbyOpening)+"\" · Depth: "+fmtFrac(dims.cubbyDepth)+"\""),
-              h("div",null,"Rail height: "+fmtFrac(dims.cubbyRailH)+"\" · Total: "+fmtFrac(dims.cubbyTotalH)+"\""),
-              h("div",{style:{marginTop:4,fontSize:11,color:"var(--dim)"}},orientLabel+" side on rails ("+(config.slideOut==="long"?"deep frame, narrow opening":"shallow frame, wide opening")+")")
-            ) : null,
-            config.binPreset === "custom" ? h("div",{style:{marginTop:10}},
-              h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",marginBottom:6}},"OVERALL (with lid)"),
-              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}},
-                h(NumberInput,{label:"Width",value:config.customBin.overallW,onChange:function(v){updateCustomBin("overallW",v)},min:6,max:40,step:0.125,unit:"in"}),
-                h(NumberInput,{label:"Depth",value:config.customBin.overallD,onChange:function(v){updateCustomBin("overallD",v)},min:6,max:40,step:0.125,unit:"in"}),
-                h(NumberInput,{label:"Height",value:config.customBin.overallH,onChange:function(v){updateCustomBin("overallH",v)},min:4,max:30,step:0.125,unit:"in"})
-              ),
-              h("div",{style:{fontSize:11,fontWeight:600,color:"var(--mid)",marginBottom:6}},"HANG POINT (lip)"),
-              h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
-                h(NumberInput,{label:"Width",value:config.customBin.hangW,onChange:function(v){updateCustomBin("hangW",v)},min:5,max:38,step:0.125,unit:"in"}),
-                h(NumberInput,{label:"Depth",value:config.customBin.hangD,onChange:function(v){updateCustomBin("hangD",v)},min:5,max:38,step:0.125,unit:"in"}),
-                h(NumberInput,{label:"Height",value:config.customBin.hangH,onChange:function(v){updateCustomBin("hangH",v)},min:3,max:28,step:0.125,unit:"in"})
-              )
-            ) : null
           ),
 
           h(Section,{title:"Slide-Out Orientation"},
             h(OptionButtons,{options:[["long","Long Side on Rails"],["short","Short Side on Rails"]],value:config.slideOut,onChange:function(v){update("slideOut",v)}}),
             h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)",lineHeight:1.5}},
               config.slideOut==="long"
-                ? "Long side sits on rails going into depth. Short side faces you as the opening."
-                : "Short side sits on rails going into depth. Long side faces you as a wider opening."
+                ? "Long side sits on rails going into depth. Short side faces you."
+                : "Short side sits on rails going into depth. Long side faces you."
             )
           ),
 
@@ -753,10 +894,10 @@ function App() {
             h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)"}},
               config.frameMaterial==="furring"
                 ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Orient 1.5" side vertical for best sag resistance.'
-                : "Shelf supports: 1×2 common boards ("+SHELF_SUPPORT.thickness+"\" × "+SHELF_SUPPORT.width+"\")"
+                : "Shelf supports: 1×2 common boards (" + SHELF_SUPPORT.thickness + '" × ' + SHELF_SUPPORT.width + '")'
             ),
             sagWarning ? h("div",{style:{marginTop:8,padding:8,background:"var(--warn-bg)",borderRadius:6,border:"1px solid var(--warn-border)",fontSize:11,color:"var(--warn)",lineHeight:1.5}},
-              "⚠ Opening is "+fmtFrac(dims.cubbyOpening)+"\". Furring strips may sag on spans over 18\". Consider adding a center divider or using 1×2 common boards for shelf rails."
+              "⚠ Some openings exceed 18\". Furring strips may sag. Consider 1×2 common boards for shelf rails."
             ) : null
           ),
 
@@ -773,7 +914,7 @@ function App() {
         h("div",{style:{display:"flex",flexDirection:"column",gap:16,minWidth:0}},
 
           h(Section,{title:"Preview"},
-            h(WorkbenchPreview,{config:activeConfig,dims:dims})
+            h(WorkbenchPreview,{config:config,dims:dims})
           ),
 
           h(Section,{title:"Overall Dimensions"},
@@ -785,11 +926,17 @@ function App() {
                 );
               })
             ),
-            h("div",{style:{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}},
-              [["Opening",dims.cubbyOpening],["Depth",dims.cubbyDepth],["Rail H",dims.cubbyRailH]].map(function(item){
-                return h("div",{key:item[0],style:{background:"var(--input-bg)",borderRadius:8,padding:10,fontSize:12}},
-                  h("span",{style:{color:"var(--dim)"}},item[0]+": "),
-                  h("span",{style:{color:"var(--bright)",fontWeight:600}},fmtFrac(item[1])+"\"")
+            // Per-row cubby dims summary
+            h("div",{style:{marginTop:10,display:"flex",flexDirection:"column",gap:6}},
+              dims.perRow.map(function(row, i) {
+                return h("div",{key:i,style:{background:"var(--input-bg)",borderRadius:8,padding:"8px 12px",fontSize:12}},
+                  h("span",{style:{color:"var(--gold)",fontWeight:700}},"Row " + (i+1) + ": "),
+                  h("span",{style:{color:"var(--bright)"}},
+                    (row.binPreset === "12gal" ? "12 Gal" : row.binPreset === "27gal" ? "27 Gal" : "Custom") +
+                    " — " + row.cols + " col" + (row.cols>1?"s":"") +
+                    " × " + row.binsDeep + " deep" +
+                    " — Opening: " + fmtFrac(row.cubbyOpening) + '" — Depth: ' + fmtFrac(row.cubbyDepth) + '"'
+                  )
                 );
               })
             )
@@ -797,7 +944,6 @@ function App() {
 
           // Cut List
           h(Section,{title:"Cut List (Build Order)"},
-
             h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 1: Top & Bottom Frames"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
               h(CutItem,{name:"Width Rails ("+frameName(true)+")",qty:dims.frameWidthRailCount,detail:fmtFrac(dims.frameWidthRailLength)+"\" each",note:"Front & back rails, both frames"}),
@@ -805,14 +951,14 @@ function App() {
               dims.frameDividerCount > 0 ? h(CutItem,{name:"Frame Dividers ("+frameName(true)+")",qty:dims.frameDividerCount,detail:fmtFrac(dims.frameDividerLength)+"\" each",note:"Column dividers inside frames"}) : null
             ),
 
-            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 2: Uprights (Pocket Holes)"),
+            h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 2: Uprights"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
               h(CutItem,{name:"Vertical Uprights ("+frameName(true)+")",qty:dims.uprightCount,detail:fmtFrac(dims.uprightLength)+"\" each",note:"Connect top & bottom frames"})
             ),
 
             h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Step 3: Shelf Rails"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:16}},
-              h(CutItem,{name:"Shelf Supports ("+(config.frameMaterial==="furring"?"1×2 furring":"1×2 common")+")",qty:dims.totalShelfRails,detail:fmtFrac(dims.shelfRailLength)+"\" each",note:"Bin rest rails inside cubbies"})
+              h(CutItem,{name:"Shelf Supports (1×2)",qty:dims.totalShelfRails,detail:fmtFrac(dims.shelfRailLength)+"\" each",note:"Bin rest rails inside cubbies"})
             ),
 
             (config.hasTop || config.hasBottomShelf) ? h("div",null,
@@ -827,11 +973,11 @@ function App() {
             h("div",{style:{padding:12,background:"var(--input-bg)",borderRadius:8,display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:8,textAlign:"center"}},
               h("div",null,
                 h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.frameTotal),
-                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},config.frameMaterial==="plywood"?"4×8 Ply (frame)":"8ft "+frameName(true)+"s")
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},config.frameMaterial==="plywood"?"4×8 Ply":"8ft "+frameName(true)+"s")
               ),
               h("div",null,
                 h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.plywoodSheets),
-                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"4×8 Ply (top/shelf)")
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"4×8 Ply (surf)")
               ),
               h("div",null,
                 h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},"~"+dims.eightFtOneBys),
@@ -839,37 +985,39 @@ function App() {
               ),
               h("div",null,
                 h("div",{style:{fontSize:18,fontWeight:700,color:"var(--green)",fontFamily:"monospace"}},dims.totalBins),
-                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"Totes needed")
+                h("div",{style:{fontSize:10,color:"var(--dim)",textTransform:"uppercase"}},"Totes")
               )
             )
           ),
 
-          // Supply / Shopping List
+          // Shopping List
           h(Section,{title:"Shopping List"},
             h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Lumber"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:14}},
               h(SupplyItem,{check:true,name:"Frame lumber",qty:supplyList.frameLumber,detail:supplyList.frameLumberLabel}),
               h(SupplyItem,{check:true,name:"Shelf rail boards",qty:supplyList.shelfRails,detail:supplyList.shelfRailLabel}),
-              supplyList.needsPlywood ? h(SupplyItem,{check:true,name:'Surface plywood (3/4")',qty:supplyList.plywoodSheets,detail:"4×8 sheet"+(supplyList.plywoodSheets!==1?"s":"")+" — top & bottom"}) : null
+              supplyList.needsPlywood ? h(SupplyItem,{check:true,name:'Surface plywood (3/4")',qty:supplyList.plywoodSheets,detail:"4×8 sheet"+(supplyList.plywoodSheets!==1?"s":"")}) : null
             ),
 
             h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Hardware"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5,marginBottom:14}},
               supplyList.sameSize
-                ? h(SupplyItem,{check:true,name:supplyList.frameScrewLen+" pocket hole screws",qty:"box of "+supplyList.combinedBox,detail:supplyList.combinedPocket+" needed (frames + shelf rails)"})
+                ? h(SupplyItem,{check:true,name:supplyList.frameScrewLen+" pocket hole screws",qty:"box of "+supplyList.combinedBox,detail:supplyList.combinedPocket+" needed"})
                 : h("div",null,
                     h(SupplyItem,{check:true,name:supplyList.frameScrewLen+" pocket screws (frames)",qty:"box of "+supplyList.frameBox,detail:supplyList.framePocketTotal+" needed"}),
                     h("div",{style:{height:5}}),
                     h(SupplyItem,{check:true,name:supplyList.shelfScrewLen+" pocket screws (shelves)",qty:"box of "+supplyList.shelfBox,detail:supplyList.shelfRailScrews+" needed"})
                   ),
-              supplyList.surfaceScrews > 0 ? h(SupplyItem,{check:true,name:'1-1/4" wood screws (plywood)',qty:"box of "+supplyList.surfaceBox,detail:supplyList.surfaceScrews+" needed for surfaces"}) : null,
+              supplyList.surfaceScrews > 0 ? h(SupplyItem,{check:true,name:'1-1/4" wood screws (plywood)',qty:"box of "+supplyList.surfaceBox,detail:supplyList.surfaceScrews+" needed"}) : null,
               h(SupplyItem,{check:true,name:"Wood glue",qty:"1",detail:"Titebond II or III"}),
               supplyList.casters > 0 ? h(SupplyItem,{check:true,name:"Heavy-duty locking casters",qty:supplyList.casters,detail:'3" swivel, 2 locking + 2 fixed'}) : null
             ),
 
             h("div",{style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Bins"),
             h("div",{style:{display:"flex",flexDirection:"column",gap:5}},
-              h(SupplyItem,{check:true,name:supplyList.binName,qty:supplyList.totes,detail:config.cols+"×"+config.rows+" grid"})
+              binSummary.map(function(s, i) {
+                return h(SupplyItem,{key:i,check:true,name:s,qty:"",detail:""});
+              })
             ),
 
             h("div",{style:{marginTop:14,padding:10,background:"var(--input-bg)",borderRadius:8,fontSize:11,color:"var(--dim)",lineHeight:1.6}},
@@ -879,7 +1027,7 @@ function App() {
 
           // Blueprint
           h(Section,{title:"Blueprint"},
-            h(Blueprint,{config:activeConfig,dims:dims})
+            h(Blueprint,{config:config,dims:dims})
           )
         )
       )
