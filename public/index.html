@@ -1054,7 +1054,7 @@ function Blueprint(props) {
     }
     doc.write('• Top lid clearance above last row: <strong>' + fmtFrac(perRow[rows-1].cubbyLidH) + '"</strong> for the topmost bin\'s lid.<br>');
     doc.write('The rails should be level and parallel. Use a scrap piece of 1×2 as a spacer jig to mark consistent heights.<br>');
-    doc.write('Orient the 1×2 rail with the 1.5" face UP (bearing surface) and 0.75" face against the upright.<br>');
+    doc.write('Mount the 1×2 rail to the inside face of the upright.<br>');
     doc.write('Attach each with glue + two 1-1/4" pocket screws into the upright.</div></div>');
 
     // Step 7: Bottom shelf (if applicable)
@@ -1222,8 +1222,8 @@ function App() {
             h(OptionButtons,{options:[["2x4","2×4 Lumber"],["plywood",'3/4" Plywood'],["furring","1×2 Furring"]],value:config.frameMaterial,onChange:function(v){update("frameMaterial",v)}}),
             h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)"}},
               config.frameMaterial==="furring"
-                ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Orient with 1.5" side bearing weight (opposite of 2×4 orientation).'
-                : "Shelf supports: 1×2 common boards (" + SHELF_SUPPORT.thickness + '" × ' + SHELF_SUPPORT.width + '"). 1.5" face up as bearing surface.'
+                ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Same inside measurements as plywood — only overall height differs.'
+                : "Shelf supports: 1×2 common boards (" + SHELF_SUPPORT.thickness + '" × ' + SHELF_SUPPORT.width + '").'
             ),
             sagWarning ? h("div",{style:{marginTop:8,padding:8,background:"var(--warn-bg)",borderRadius:6,border:"1px solid var(--warn-border)",fontSize:11,color:"var(--warn)",lineHeight:1.5}},
               "⚠ Some openings exceed 18\". Furring strips may sag. Consider 1×2 common boards for shelf rails."
