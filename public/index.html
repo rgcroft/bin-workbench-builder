@@ -56,14 +56,18 @@ var h = R.createElement;
 var useState = R.useState, useMemo = R.useMemo, useCallback = R.useCallback, useEffect = R.useEffect, useRef = R.useRef;
 
 // ── MEASURED CUBBY DIMENSIONS ───────────────────────────────
+// bottomH = rail-to-rail height for the bottom row (bin body only, no lid below)
+// upperH  = rail-to-rail height for upper rows (bin body + lid of bin below + clearance)
+// lidH    = lid height (for top clearance calculation)
+// Rails mount on SIDES of uprights only — they do NOT add to vertical height.
 var CUBBY_DIMS = {
   "12gal": {
-    long:  { opening: 15,     depth: 20.25, railH: 12.625, totalH: 14.5 },
-    short: { opening: 20.5,   depth: 15,    railH: 12.625, totalH: 14.5 },
+    long:  { opening: 15,     depth: 20.25, bottomH: 12.5, upperH: 14.875, lidH: 2.125 },
+    short: { opening: 20.5,   depth: 15,    bottomH: 12.5, upperH: 14.875, lidH: 2.125 },
   },
   "27gal": {
-    long:  { opening: 20.5,   depth: 30.5,  railH: 12.75,  totalH: 15.5 },
-    short: { opening: 30.5,   depth: 20.625,railH: 12.75,  totalH: 15.5 },
+    long:  { opening: 20.5,   depth: 30.5,  bottomH: 12.75, upperH: 15.25, lidH: 2.25 },
+    short: { opening: 30.5,   depth: 20.625,bottomH: 12.75, upperH: 15.25, lidH: 2.25 },
   },
 };
 
@@ -86,18 +90,20 @@ var TOP_OVERHANG = 1.5;
 
 // ── CALCULATIONS ─────────────────────────────────────────────
 function getRowCubby(rc, orient, customBin) {
-  var cubbyOpening, singleDepth, cubbyRailH, cubbyTotalH;
+  var cubbyOpening, singleDepth, cubbyBottomH, cubbyUpperH, cubbyLidH;
   if (rc.binPreset !== "custom" && CUBBY_DIMS[rc.binPreset]) {
     var cd = CUBBY_DIMS[rc.binPreset][orient];
     cubbyOpening = cd.opening; singleDepth = cd.depth;
-    cubbyRailH = cd.railH; cubbyTotalH = cd.totalH;
+    cubbyBottomH = cd.bottomH; cubbyUpperH = cd.upperH; cubbyLidH = cd.lidH;
   } else {
     cubbyOpening = orient === "long" ? customBin.hangW + CLEARANCE * 2 : customBin.hangD + CLEARANCE * 2;
     singleDepth = orient === "long" ? customBin.overallD + CLEARANCE * 2 : customBin.overallW + CLEARANCE * 2;
-    cubbyRailH = customBin.hangH + CLEARANCE;
-    cubbyTotalH = customBin.overallH + CLEARANCE;
+    // Custom bin: derive heights the same way as presets
+    cubbyBottomH = customBin.hangH;
+    cubbyLidH = customBin.overallH - customBin.hangH;
+    cubbyUpperH = customBin.overallH + CLEARANCE;
   }
-  return { cubbyOpening: cubbyOpening, singleDepth: singleDepth, cubbyRailH: cubbyRailH, cubbyTotalH: cubbyTotalH };
+  return { cubbyOpening: cubbyOpening, singleDepth: singleDepth, cubbyBottomH: cubbyBottomH, cubbyUpperH: cubbyUpperH, cubbyLidH: cubbyLidH };
 }
 
 function calculateDimensions(config) {
@@ -111,20 +117,25 @@ function calculateDimensions(config) {
     var rowW = rc.cols * cd.cubbyOpening + (rc.cols + 1) * frame.thickness;
     return {
       cubbyOpening: cd.cubbyOpening, cubbyDepth: cubbyDepth, singleDepth: cd.singleDepth,
-      cubbyRailH: cd.cubbyRailH, cubbyTotalH: cd.cubbyTotalH,
+      cubbyBottomH: cd.cubbyBottomH, cubbyUpperH: cd.cubbyUpperH, cubbyLidH: cd.cubbyLidH,
       cols: rc.cols, binsDeep: binsDeep, binPreset: rc.binPreset, rowW: rowW,
-      yOffset: 0
+      yOffset: 0, cubbyRowH: 0
     };
   });
 
   var rows = perRow.length;
+  // Rails are on SIDES only — they don't add to vertical height.
+  // Bottom row = bin body only (no lid below). Upper rows = bin body + lid of bin below + clearance.
+  // Top = lid clearance for the topmost bin under the top surface.
   var y = 0;
   for (var i = 0; i < rows; i++) {
-    y += SHELF_SUPPORT.width;
     perRow[i].yOffset = y;
-    y += perRow[i].cubbyTotalH;
+    var rowH = (i === 0) ? perRow[i].cubbyBottomH : perRow[i].cubbyUpperH;
+    perRow[i].cubbyRowH = rowH;
+    y += rowH;
   }
-  y += SHELF_SUPPORT.width;
+  // Top lid clearance: the topmost bin's lid fits under the top surface
+  y += perRow[rows - 1].cubbyLidH;
   var cubbyAreaH = y;
 
   var maxRowW = 0, maxCubbyDepth = 0, maxCols = 0;
@@ -378,38 +389,31 @@ function WorkbenchPreview(props) {
     addBox(ux, shelfBase, totalD - ft, ft, dims.cubbyAreaH, ft, mc.face, mc.top, mc.side, "upright");
   }
 
-  // Per-row: shelf rails and bins
+  // Per-row: shelf rails (on SIDES only) and bins
   for (var ri = 0; ri < rows; ri++) {
     var row = perRow[ri];
     var rowYBase = shelfBase + row.yOffset;
     var rowXOffset = (totalW - row.rowW) / 2; // center narrower rows
 
-    // Shelf rails at bottom of this row
-    var railY = rowYBase - SHELF_SUPPORT.width;
-    addBox(rowXOffset, railY, 0, row.rowW, SHELF_SUPPORT.width, ft * 0.5, "#b8a070", "#c8b488", "#9a8560", "rail");
-
-    // Shelf rails at top of this row (only for last row)
-    if (ri === rows - 1) {
-      var topRailY = rowYBase + row.cubbyTotalH;
-      addBox(rowXOffset, topRailY, 0, row.rowW, SHELF_SUPPORT.width, ft * 0.5, "#b8a070", "#c8b488", "#9a8560", "rail");
-    }
-
-    // Cross-member depth rails (subtle)
-    for (var cc = 0; cc <= row.cols; cc++) {
+    // Side-mounted shelf rails at bottom of this row (on each upright, not spanning front)
+    for (var cc = 0; cc < row.cols; cc++) {
       var cmx = rowXOffset + cc * (row.cubbyOpening + ft);
-      addBox(cmx + ft * 0.25, railY + SHELF_SUPPORT.width * 0.25, ft, ft * 0.5, SHELF_SUPPORT.width * 0.5, totalD - ft * 2, mc.side, null, null, "crossmember");
+      // Left rail (on inside of left upright)
+      addBox(cmx + ft, rowYBase, ft, SHELF_SUPPORT.thickness, SHELF_SUPPORT.width, totalD - ft * 2, "#b8a070", "#c8b488", "#9a8560", "rail");
+      // Right rail (on inside of right upright)
+      addBox(cmx + ft + row.cubbyOpening - SHELF_SUPPORT.thickness, rowYBase, ft, SHELF_SUPPORT.thickness, SHELF_SUPPORT.width, totalD - ft * 2, "#b8a070", "#c8b488", "#9a8560", "rail");
     }
 
-    // Bins
+    // Bins — use actual bin dimensions for body/lid proportions
+    var binBodyH = row.cubbyBottomH;  // bin body (hangH) is what bottomH represents
+    var binLidH = row.cubbyLidH;      // lid height
     for (var cc = 0; cc < row.cols; cc++) {
       var binX = rowXOffset + cc * (row.cubbyOpening + ft) + ft;
       for (var dd = 0; dd < row.binsDeep; dd++) {
         var binZ = ft + dd * row.singleDepth;
         var binD = row.singleDepth - (dd === row.binsDeep - 1 ? ft : 0.5);
-        var bodyH = row.cubbyTotalH * 0.82;
-        var lidH = row.cubbyTotalH - bodyH;
-        addBox(binX, rowYBase, binZ, row.cubbyOpening, bodyH, binD, "#2a2d2e", "#333", "#222", "bin");
-        addBox(binX, rowYBase + bodyH, binZ, row.cubbyOpening, lidH, binD, "#e8b710", "#f0c420", "#c99e0e", "lid");
+        addBox(binX, rowYBase, binZ, row.cubbyOpening, binBodyH, binD, "#2a2d2e", "#333", "#222", "bin");
+        addBox(binX, rowYBase + binBodyH, binZ, row.cubbyOpening, binLidH, binD, "#e8b710", "#f0c420", "#c99e0e", "lid");
       }
     }
   }
@@ -673,20 +677,17 @@ function Blueprint(props) {
   var cubbyTop = shelfBase - cubbyH;
   fe.push(h("rect",{key:k[0]++,x:fOx,y:cubbyTop,width:fW,height:cubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
 
-  // Per-row: uprights, shelf rails, bins + per-row detail dimensions
+  // Per-row: uprights, bins + per-row detail dimensions
+  // Note: shelf rails are on SIDES only — not visible from front elevation
   for (var ri = 0; ri < rows; ri++) {
     var row = perRow[ri];
     var rowXOffset = (totalW - row.rowW) / 2;
-    var rowYTop = cubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyTotalH) * scaleF;
+    var rowYTop = cubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyRowH) * scaleF;
 
-    // Shelf rail below this row
-    var railYBot = cubbyTop + (dims.cubbyAreaH - row.yOffset) * scaleF;
-    fe.push(h("rect",{key:k[0]++,x:fOx+rowXOffset*scaleF,y:railYBot,width:row.rowW*scaleF,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
-
-    // Uprights for this row
+    // Uprights for this row (full cubby area height)
     for (var cc = 0; cc <= row.cols; cc++) {
       var ux = rowXOffset + cc * (row.cubbyOpening + ft);
-      fe.push(h("rect",{key:k[0]++,x:fOx+ux*scaleF,y:rowYTop,width:ft*scaleF,height:(row.cubbyTotalH+SHELF_SUPPORT.width)*scaleF,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+      fe.push(h("rect",{key:k[0]++,x:fOx+ux*scaleF,y:rowYTop,width:ft*scaleF,height:row.cubbyRowH*scaleF,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
     }
 
     // Bins
@@ -694,7 +695,7 @@ function Blueprint(props) {
       var bx = fOx + (rowXOffset + cc * (row.cubbyOpening + ft) + ft) * scaleF + 2;
       var by = rowYTop + 2;
       var bw = row.cubbyOpening * scaleF - 4;
-      var bh = row.cubbyTotalH * scaleF - 4;
+      var bh = row.cubbyRowH * scaleF - 4;
       fe.push(h("rect",{key:k[0]++,x:bx,y:by,width:bw,height:bh,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
       if (row.binsDeep > 1) {
         fe.push(h("text",{key:k[0]++,x:bx+bw/2,y:by+bh/2+4,textAnchor:"middle",fontSize:8,fill:"#999",fontFamily:"monospace"},row.binsDeep+" deep"));
@@ -707,15 +708,19 @@ function Blueprint(props) {
       var firstBinX2 = fOx + (rowXOffset + ft + row.cubbyOpening) * scaleF;
       dimLine(fe, k, firstBinX1, rowYTop - 2, firstBinX2, rowYTop - 2, fmtFrac(row.cubbyOpening)+'"', "above", "#cc3300");
     }
-    // Per-row cubby height dimension (right side)
-    dimLine(fe, k, fOx + fW + 20, rowYTop, fOx + fW + 20, rowYTop + row.cubbyTotalH * scaleF, fmtFrac(row.cubbyTotalH)+'"', "right", "#cc3300");
+    // Per-row cubby height dimension (right side) — show actual row height
+    var rowLabel = ri === 0 ? "bottom" : "upper";
+    dimLine(fe, k, fOx + fW + 20, rowYTop, fOx + fW + 20, rowYTop + row.cubbyRowH * scaleF, fmtFrac(row.cubbyRowH)+'"', "right", "#cc3300");
     // Row label
-    fe.push(h("text",{key:k[0]++,x:fOx+fW+36,y:rowYTop + row.cubbyTotalH*scaleF/2 + 3,fontSize:7,fill:"#666",fontFamily:"monospace"},"Row "+(ri+1)));
+    fe.push(h("text",{key:k[0]++,x:fOx+fW+36,y:rowYTop + row.cubbyRowH*scaleF/2 + 3,fontSize:7,fill:"#666",fontFamily:"monospace"},"Row "+(ri+1)+" ("+rowLabel+")"));
+  }
 
-    // Top shelf rail (only for last row)
-    if (ri === rows - 1) {
-      fe.push(h("rect",{key:k[0]++,x:fOx,y:cubbyTop,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
-    }
+  // Top lid clearance dimension (show above last row)
+  if (rows > 0) {
+    var lastRow = perRow[rows - 1];
+    var topLidY = cubbyTop + (dims.cubbyAreaH - lastRow.yOffset - lastRow.cubbyRowH - lastRow.cubbyLidH) * scaleF;
+    var topLidYEnd = cubbyTop + (dims.cubbyAreaH - lastRow.yOffset - lastRow.cubbyRowH) * scaleF;
+    dimLine(fe, k, fOx + fW + 20, topLidY, fOx + fW + 20, topLidYEnd, fmtFrac(lastRow.cubbyLidH)+'" lid', "right", "#996600");
   }
 
   // Top surface
@@ -798,20 +803,25 @@ function Blueprint(props) {
   var sCubbyTop = sShelfBase - sCubbyH;
   se.push(h("rect",{key:k[0]++,x:sOx,y:sCubbyTop,width:sW,height:sCubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
 
-  // Show bin depth slots in side view
+  // Show bin depth slots and side-mounted rails in side view
   for (var ri = 0; ri < rows; ri++) {
     var row = perRow[ri];
-    var sRowYTop = sCubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyTotalH) * scaleSide;
+    var sRowYTop = sCubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyRowH) * scaleSide;
+    var sRowYBot = sRowYTop + row.cubbyRowH * scaleSide;
     // Front/back uprights
-    se.push(h("rect",{key:k[0]++,x:sOx,y:sRowYTop,width:ft*scaleSide,height:row.cubbyTotalH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
-    se.push(h("rect",{key:k[0]++,x:sOx+sW-ft*scaleSide,y:sRowYTop,width:ft*scaleSide,height:row.cubbyTotalH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    se.push(h("rect",{key:k[0]++,x:sOx,y:sRowYTop,width:ft*scaleSide,height:row.cubbyRowH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    se.push(h("rect",{key:k[0]++,x:sOx+sW-ft*scaleSide,y:sRowYTop,width:ft*scaleSide,height:row.cubbyRowH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    // Side-mounted shelf rails (visible from side view)
+    var railW = SHELF_SUPPORT.width * scaleSide;
+    se.push(h("rect",{key:k[0]++,x:sOx+ft*scaleSide,y:sRowYBot-railW,width:SHELF_SUPPORT.thickness*scaleSide,height:railW,fill:"#eee",stroke:"#555",strokeWidth:0.4}));
+    se.push(h("rect",{key:k[0]++,x:sOx+sW-ft*scaleSide-SHELF_SUPPORT.thickness*scaleSide,y:sRowYBot-railW,width:SHELF_SUPPORT.thickness*scaleSide,height:railW,fill:"#eee",stroke:"#555",strokeWidth:0.4}));
     // Bins deep
     for (var dd = 0; dd < row.binsDeep; dd++) {
       var binZ = ft + dd * row.singleDepth;
       var binZEnd = binZ + row.singleDepth - (dd === row.binsDeep - 1 ? ft : 0.5);
       var bsx = sOx + binZ * scaleSide;
       var bsw = (binZEnd - binZ) * scaleSide;
-      se.push(h("rect",{key:k[0]++,x:bsx,y:sRowYTop+2,width:bsw,height:row.cubbyTotalH*scaleSide-4,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
+      se.push(h("rect",{key:k[0]++,x:bsx,y:sRowYTop+2,width:bsw,height:row.cubbyRowH*scaleSide-4,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
     }
     // Depth dimension for this row
     if (ri === 0) {
@@ -884,7 +894,7 @@ function Blueprint(props) {
     for (var ri = 0; ri < rows; ri++) {
       var row = perRow[ri];
       var binName = row.binPreset === "12gal" ? "12 Gal" : row.binPreset === "27gal" ? "27 Gal" : "Custom";
-      doc.write('<tr><td class="qty">' + (ri+1) + '</td><td>' + binName + '</td><td class="qty">' + row.cols + '</td><td class="qty">' + row.binsDeep + '</td><td>' + fmtFrac(row.cubbyOpening) + '"</td><td>' + fmtFrac(row.cubbyDepth) + '"</td><td>' + fmtFrac(row.cubbyTotalH) + '"</td></tr>');
+      doc.write('<tr><td class="qty">' + (ri+1) + '</td><td>' + binName + '</td><td class="qty">' + row.cols + '</td><td class="qty">' + row.binsDeep + '</td><td>' + fmtFrac(row.cubbyOpening) + '"</td><td>' + fmtFrac(row.cubbyDepth) + '"</td><td>' + fmtFrac(row.cubbyRowH) + '"</td></tr>');
     }
     doc.write('</table>');
 
@@ -1036,12 +1046,15 @@ function Blueprint(props) {
 
     // Step 6: Install shelf rails
     doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Install Shelf Support Rails</span></div>');
-    doc.write('<div class="step-body">The shelf rails are what the bins rest on. Install them inside each cubby on both left and right uprights.<br>');
+    doc.write('<div class="step-body">The shelf rails mount on the <strong>inside faces of the uprights</strong> (sides only — not across the front). Bins rest their lip handles on these rails.<br>');
     for (var ri = 0; ri < rows; ri++) {
       var row = perRow[ri];
-      doc.write('• <strong>Row ' + (ri+1) + ':</strong> Mount rails at <strong>' + fmtFrac(row.yOffset - SHELF_SUPPORT.width) + '"</strong> from the bottom of the cubby area (bottom of rail). ' + (row.cols * 2) + ' rails total — 2 per cubby column.<br>');
+      var rowType = ri === 0 ? " (bottom row — bin body only)" : " (upper row — includes lid clearance below)";
+      doc.write('• <strong>Row ' + (ri+1) + ':</strong> Mount rails at <strong>' + fmtFrac(row.yOffset) + '"</strong> from the bottom of the cubby area. Row height: ' + fmtFrac(row.cubbyRowH) + '"' + rowType + '. ' + (row.cols * 2) + ' rails total — 2 per cubby column.<br>');
     }
+    doc.write('• Top lid clearance above last row: <strong>' + fmtFrac(perRow[rows-1].cubbyLidH) + '"</strong> for the topmost bin\'s lid.<br>');
     doc.write('The rails should be level and parallel. Use a scrap piece of 1×2 as a spacer jig to mark consistent heights.<br>');
+    doc.write('Orient the 1×2 rail with the 1.5" face UP (bearing surface) and 0.75" face against the upright.<br>');
     doc.write('Attach each with glue + two 1-1/4" pocket screws into the upright.</div></div>');
 
     // Step 7: Bottom shelf (if applicable)
@@ -1209,8 +1222,8 @@ function App() {
             h(OptionButtons,{options:[["2x4","2×4 Lumber"],["plywood",'3/4" Plywood'],["furring","1×2 Furring"]],value:config.frameMaterial,onChange:function(v){update("frameMaterial",v)}}),
             h("div",{style:{marginTop:8,fontSize:11,color:"var(--dim)"}},
               config.frameMaterial==="furring"
-                ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Orient 1.5" side vertical for best sag resistance.'
-                : "Shelf supports: 1×2 common boards (" + SHELF_SUPPORT.thickness + '" × ' + SHELF_SUPPORT.width + '")'
+                ? 'Poplar 1×2 furring strips (0.75" × 1.5"). Orient with 1.5" side bearing weight (opposite of 2×4 orientation).'
+                : "Shelf supports: 1×2 common boards (" + SHELF_SUPPORT.thickness + '" × ' + SHELF_SUPPORT.width + '"). 1.5" face up as bearing surface.'
             ),
             sagWarning ? h("div",{style:{marginTop:8,padding:8,background:"var(--warn-bg)",borderRadius:6,border:"1px solid var(--warn-border)",fontSize:11,color:"var(--warn)",lineHeight:1.5}},
               "⚠ Some openings exceed 18\". Furring strips may sag. Consider 1×2 common boards for shelf rails."
