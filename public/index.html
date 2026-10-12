@@ -59,10 +59,10 @@ var useState = R.useState, useMemo = R.useMemo, useCallback = R.useCallback, use
 var CUBBY_DIMS = {
   "12gal": {
     long:  { opening: 15,     depth: 20.25, railH: 12.625, totalH: 14.5 },
-    short: { opening: 20.25,  depth: 15,    railH: 12.625, totalH: 14.5 },
+    short: { opening: 20.5,   depth: 15,    railH: 12.625, totalH: 14.5 },
   },
   "27gal": {
-    long:  { opening: 20.625, depth: 30.5,  railH: 12.75,  totalH: 15.5 },
+    long:  { opening: 20.5,   depth: 30.5,  railH: 12.75,  totalH: 15.5 },
     short: { opening: 30.5,   depth: 20.625,railH: 12.75,  totalH: 15.5 },
   },
 };
@@ -260,29 +260,12 @@ function WorkbenchPreview(props) {
   var config = props.config, dims = props.dims;
   var angleState = useState(-0.55);
   var angle = angleState[0], setAngle = angleState[1];
-  var spinState = useState(true);
-  var spinning = spinState[0], setSpinning = spinState[1];
   var dragState = useState(null);
   var dragStart = dragState[0], setDragStart = dragState[1];
-  var frameRef = useRef();
   var svgRef = useRef();
 
-  // Auto-rotate
-  useEffect(function() {
-    if (!spinning) return;
-    var last = 0;
-    function tick(t) {
-      if (last) setAngle(function(a) { return a - (t - last) * 0.0004; });
-      last = t;
-      frameRef.current = requestAnimationFrame(tick);
-    }
-    frameRef.current = requestAnimationFrame(tick);
-    return function() { cancelAnimationFrame(frameRef.current); };
-  }, [spinning]);
-
-  // Drag to rotate
+  // Drag to rotate (manual only — no auto-spin)
   var onPointerDown = useCallback(function(e) {
-    setSpinning(false);
     setDragStart({ x: e.clientX, a: angle });
     e.currentTarget.setPointerCapture(e.pointerId);
   }, [angle]);
@@ -292,7 +275,6 @@ function WorkbenchPreview(props) {
     setAngle(dragStart.a + dx * 0.008);
   }, [dragStart]);
   var onPointerUp = useCallback(function() { setDragStart(null); }, []);
-  var onDoubleClick = useCallback(function() { setSpinning(true); }, []);
 
   // Projection setup
   var cosA = Math.cos(angle), sinA = Math.sin(angle);
@@ -311,23 +293,39 @@ function WorkbenchPreview(props) {
     var ov = TOP_OVERHANG;
     corners.push([-ov,totalH,-ov],[totalW+ov,totalH,-ov],[-ov,totalH,totalD+ov],[totalW+ov,totalH,totalD+ov]);
   }
-  var minPX = 1e9, maxPX = -1e9, minPY = 1e9, maxPY = -1e9;
-  corners.forEach(function(c) {
-    var sx = c[0] * cosA - c[2] * sinA;
-    var sy = -c[1] + (c[0] * sinA + c[2] * cosA) * tilt;
-    if (sx < minPX) minPX = sx;
-    if (sx > maxPX) maxPX = sx;
-    if (sy < minPY) minPY = sy;
-    if (sy > maxPY) maxPY = sy;
+  // Fixed viewBox: compute worst-case bounding box across all angles so SVG size never changes
+  var worstMinPX = 1e9, worstMaxPX = -1e9, worstMinPY = 1e9, worstMaxPY = -1e9;
+  var testAngles = [0, Math.PI/4, Math.PI/2, 3*Math.PI/4, Math.PI, -Math.PI/4, -Math.PI/2, -3*Math.PI/4];
+  testAngles.forEach(function(ta) {
+    var ca = Math.cos(ta), sa = Math.sin(ta);
+    corners.forEach(function(c) {
+      var sx = c[0] * ca - c[2] * sa;
+      var sy = -c[1] + (c[0] * sa + c[2] * ca) * tilt;
+      if (sx < worstMinPX) worstMinPX = sx;
+      if (sx > worstMaxPX) worstMaxPX = sx;
+      if (sy < worstMinPY) worstMinPY = sy;
+      if (sy > worstMaxPY) worstMaxPY = sy;
+    });
   });
-  var rangeX = maxPX - minPX || 1, rangeY = maxPY - minPY || 1;
+  var rangeX = worstMaxPX - worstMinPX || 1, rangeY = worstMaxPY - worstMinPY || 1;
   var targetW = 500, targetH = 320;
   var sc = Math.min(targetW / rangeX, targetH / rangeY) * 0.82;
   var pad = 30;
-  var ox = pad - minPX * sc;
-  var oy = pad - minPY * sc;
   var svgW = rangeX * sc + pad * 2;
   var svgH = rangeY * sc + pad * 2;
+  // Center current view within the fixed viewBox
+  var curMinPX = 1e9, curMaxPX = -1e9, curMinPY = 1e9, curMaxPY = -1e9;
+  corners.forEach(function(c) {
+    var sx = c[0] * cosA - c[2] * sinA;
+    var sy = -c[1] + (c[0] * sinA + c[2] * cosA) * tilt;
+    if (sx < curMinPX) curMinPX = sx;
+    if (sx > curMaxPX) curMaxPX = sx;
+    if (sy < curMinPY) curMinPY = sy;
+    if (sy > curMaxPY) curMaxPY = sy;
+  });
+  var curRangeX = curMaxPX - curMinPX, curRangeY = curMaxPY - curMinPY;
+  var ox = pad + (svgW - pad * 2 - curRangeX * sc) / 2 - curMinPX * sc;
+  var oy = pad + (svgH - pad * 2 - curRangeY * sc) / 2 - curMinPY * sc;
 
   function px(x,y,z) { return ox + (x * cosA - z * sinA) * sc; }
   function py(x,y,z) { return oy + (-y + (x * sinA + z * cosA) * tilt) * sc; }
@@ -473,14 +471,13 @@ function WorkbenchPreview(props) {
       onPointerDown: onPointerDown,
       onPointerMove: onPointerMove,
       onPointerUp: onPointerUp,
-      onDoubleClick: onDoubleClick,
     },
       h("defs",null,h("linearGradient",{id:"bgGrad",x1:0,y1:0,x2:0,y2:1},h("stop",{offset:"0%",stopColor:"#1a2332"}),h("stop",{offset:"100%",stopColor:"#0d1520"}))),
       h("rect",{width:svgW,height:svgH,fill:"url(#bgGrad)",rx:8}),
       els
     ),
     h("div",{style:{position:"absolute",bottom:8,right:8,fontSize:10,color:"var(--dim)",pointerEvents:"none"}},
-      spinning ? "drag to rotate" : "double-click to spin"
+      "drag to rotate"
     )
   );
 }
@@ -612,6 +609,7 @@ function RowConfigCard(props) {
 // ── BLUEPRINT ───────────────────────────────────────────────
 function Blueprint(props) {
   var config = props.config, dims = props.dims;
+  var supplyList = calculateSupplyList(config, dims);
   var perRow = dims.perRow, rows = dims.rows;
   var ft = dims.frame.thickness;
   var totalW = dims.totalW, totalD = dims.totalD;
@@ -621,14 +619,36 @@ function Blueprint(props) {
   var topH = config.hasTop ? PLYWOOD_THICKNESS : 0;
   var bottomH = config.hasBottomShelf ? PLYWOOD_THICKNESS : 0;
   var overallH = dims.totalH;
+  var frameName = FRAME_MATERIALS[config.frameMaterial].name;
+
+  // Helper: dimension line with arrows
+  function dimLine(els, k, x1, y1, x2, y2, label, side, color) {
+    color = color || "#0066cc";
+    var isH = Math.abs(y2 - y1) < 1;
+    var ext = 5, gap = side === "below" ? 12 : side === "above" ? -12 : side === "right" ? 12 : -12;
+    if (isH) {
+      var dy = gap > 0 ? y1 + gap : y1 + gap;
+      els.push(h("line",{key:k[0]++,x1:x1,y1:y1,x2:x1,y2:dy+ext*(gap>0?1:-1),stroke:color,strokeWidth:0.4,opacity:0.6}));
+      els.push(h("line",{key:k[0]++,x1:x2,y1:y2,x2:x2,y2:dy+ext*(gap>0?1:-1),stroke:color,strokeWidth:0.4,opacity:0.6}));
+      els.push(h("line",{key:k[0]++,x1:x1,y1:dy,x2:x2,y2:dy,stroke:color,strokeWidth:0.6}));
+      els.push(h("text",{key:k[0]++,x:(x1+x2)/2,y:dy+(gap>0?10:-3),textAnchor:"middle",fontSize:8,fill:color,fontFamily:"monospace",fontWeight:700},label));
+    } else {
+      var dx = gap > 0 ? x1 + gap : x1 + gap;
+      els.push(h("line",{key:k[0]++,x1:x1,y1:y1,x2:dx+ext*(gap>0?1:-1),y2:y1,stroke:color,strokeWidth:0.4,opacity:0.6}));
+      els.push(h("line",{key:k[0]++,x1:x2,y1:y2,x2:dx+ext*(gap>0?1:-1),y2:y2,stroke:color,strokeWidth:0.4,opacity:0.6}));
+      els.push(h("line",{key:k[0]++,x1:dx,y1:y1,x2:dx,y2:y2,stroke:color,strokeWidth:0.6}));
+      var my = (y1+y2)/2;
+      els.push(h("text",{key:k[0]++,x:dx+(gap>0?3:-3),y:my,textAnchor:"middle",fontSize:8,fill:color,fontFamily:"monospace",fontWeight:700,transform:"rotate(-90,"+dx+","+my+")"},label));
+    }
+  }
 
   // ── FRONT ELEVATION ──
-  var margin = 55, drawW = 440;
+  var margin = 65, drawW = 440;
   var scaleF = Math.min(drawW / totalW, 220 / overallH);
   var fW = totalW * scaleF, fH = overallH * scaleF;
   var fOx = margin + (drawW - fW) / 2;
-  var fOy = margin / 2 + 10;
-  var fe = [], k = 0;
+  var fOy = margin / 2 + 14;
+  var fe = [], k = {0:0};
   var baseY = fOy + fH - wheelH * scaleF;
   var shelfBase = baseY;
 
@@ -636,22 +656,24 @@ function Blueprint(props) {
   if (config.hasWheels) {
     var wh = wheelH * scaleF;
     [ft * 2, totalW - ft * 2].forEach(function(wx) {
-      fe.push(h("circle",{key:k++,cx:fOx+wx*scaleF,cy:fOy+fH-wh/2,r:wh*0.35,fill:"#ccc",stroke:"#333",strokeWidth:0.75}));
+      fe.push(h("circle",{key:k[0]++,cx:fOx+wx*scaleF,cy:fOy+fH-wh/2,r:wh*0.35,fill:"#ccc",stroke:"#333",strokeWidth:0.75}));
     });
+    // Wheel height dimension
+    dimLine(fe, k, fOx + fW + 4, fOy + fH, fOx + fW + 4, fOy + fH - wh, fmtFrac(wheelH)+'"', "right", "#888");
   }
 
   // Bottom shelf
   if (config.hasBottomShelf) {
-    fe.push(h("rect",{key:k++,x:fOx,y:baseY-bottomH*scaleF,width:fW,height:bottomH*scaleF,fill:"#ddd",stroke:"#333",strokeWidth:0.75}));
+    fe.push(h("rect",{key:k[0]++,x:fOx,y:baseY-bottomH*scaleF,width:fW,height:bottomH*scaleF,fill:"#ddd",stroke:"#333",strokeWidth:0.75}));
     shelfBase = baseY - bottomH * scaleF;
   }
 
   // Cubby frame area
   var cubbyH = dims.cubbyAreaH * scaleF;
   var cubbyTop = shelfBase - cubbyH;
-  fe.push(h("rect",{key:k++,x:fOx,y:cubbyTop,width:fW,height:cubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
+  fe.push(h("rect",{key:k[0]++,x:fOx,y:cubbyTop,width:fW,height:cubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
 
-  // Per-row: uprights, shelf rails, bins
+  // Per-row: uprights, shelf rails, bins + per-row detail dimensions
   for (var ri = 0; ri < rows; ri++) {
     var row = perRow[ri];
     var rowXOffset = (totalW - row.rowW) / 2;
@@ -659,12 +681,12 @@ function Blueprint(props) {
 
     // Shelf rail below this row
     var railYBot = cubbyTop + (dims.cubbyAreaH - row.yOffset) * scaleF;
-    fe.push(h("rect",{key:k++,x:fOx+rowXOffset*scaleF,y:railYBot,width:row.rowW*scaleF,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
+    fe.push(h("rect",{key:k[0]++,x:fOx+rowXOffset*scaleF,y:railYBot,width:row.rowW*scaleF,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
 
     // Uprights for this row
     for (var cc = 0; cc <= row.cols; cc++) {
       var ux = rowXOffset + cc * (row.cubbyOpening + ft);
-      fe.push(h("rect",{key:k++,x:fOx+ux*scaleF,y:rowYTop,width:ft*scaleF,height:(row.cubbyTotalH+SHELF_SUPPORT.width)*scaleF,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+      fe.push(h("rect",{key:k[0]++,x:fOx+ux*scaleF,y:rowYTop,width:ft*scaleF,height:(row.cubbyTotalH+SHELF_SUPPORT.width)*scaleF,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
     }
 
     // Bins
@@ -673,15 +695,26 @@ function Blueprint(props) {
       var by = rowYTop + 2;
       var bw = row.cubbyOpening * scaleF - 4;
       var bh = row.cubbyTotalH * scaleF - 4;
-      fe.push(h("rect",{key:k++,x:bx,y:by,width:bw,height:bh,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
+      fe.push(h("rect",{key:k[0]++,x:bx,y:by,width:bw,height:bh,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
       if (row.binsDeep > 1) {
-        fe.push(h("text",{key:k++,x:bx+bw/2,y:by+bh/2+4,textAnchor:"middle",fontSize:9,fill:"#999",fontFamily:"monospace"},row.binsDeep+" deep"));
+        fe.push(h("text",{key:k[0]++,x:bx+bw/2,y:by+bh/2+4,textAnchor:"middle",fontSize:8,fill:"#999",fontFamily:"monospace"},row.binsDeep+" deep"));
       }
     }
 
+    // Per-row cubby opening dimension (first cubby only)
+    if (row.cols > 0) {
+      var firstBinX1 = fOx + (rowXOffset + ft) * scaleF;
+      var firstBinX2 = fOx + (rowXOffset + ft + row.cubbyOpening) * scaleF;
+      dimLine(fe, k, firstBinX1, rowYTop - 2, firstBinX2, rowYTop - 2, fmtFrac(row.cubbyOpening)+'"', "above", "#cc3300");
+    }
+    // Per-row cubby height dimension (right side)
+    dimLine(fe, k, fOx + fW + 20, rowYTop, fOx + fW + 20, rowYTop + row.cubbyTotalH * scaleF, fmtFrac(row.cubbyTotalH)+'"', "right", "#cc3300");
+    // Row label
+    fe.push(h("text",{key:k[0]++,x:fOx+fW+36,y:rowYTop + row.cubbyTotalH*scaleF/2 + 3,fontSize:7,fill:"#666",fontFamily:"monospace"},"Row "+(ri+1)));
+
     // Top shelf rail (only for last row)
     if (ri === rows - 1) {
-      fe.push(h("rect",{key:k++,x:fOx,y:cubbyTop,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
+      fe.push(h("rect",{key:k[0]++,x:fOx,y:cubbyTop,width:fW,height:SHELF_SUPPORT.width*scaleF,fill:"#eee",stroke:"#555",strokeWidth:0.5}));
     }
   }
 
@@ -689,38 +722,36 @@ function Blueprint(props) {
   if (config.hasTop) {
     var tsx = fOx - TOP_OVERHANG * scaleF;
     var tsy = cubbyTop - topH * scaleF;
-    fe.push(h("rect",{key:k++,x:tsx,y:tsy,width:topW*scaleF,height:topH*scaleF,fill:"#ccc",stroke:"#333",strokeWidth:1}));
+    fe.push(h("rect",{key:k[0]++,x:tsx,y:tsy,width:topW*scaleF,height:topH*scaleF,fill:"#ccc",stroke:"#333",strokeWidth:1}));
+    // Top overhang dimension
+    dimLine(fe, k, tsx, tsy - 2, fOx, tsy - 2, fmtFrac(TOP_OVERHANG)+'"', "above", "#888");
   }
 
-  // Dimensions
-  var dwy = fOy + fH + 16;
-  fe.push(h("line",{key:k++,x1:fOx,y1:fOy+fH+2,x2:fOx,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:fOx+fW,y1:fOy+fH+2,x2:fOx+fW,y2:dwy+4,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:fOx,y1:dwy,x2:fOx+fW,y2:dwy,stroke:"#555",strokeWidth:0.75}));
-  fe.push(h("text",{key:k++,x:fOx+fW/2,y:dwy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(totalW)+'"'));
+  // Overall width dimension (bottom)
+  var dwy = fOy + fH + 18;
+  dimLine(fe, k, fOx, fOy + fH + 2, fOx + fW, fOy + fH + 2, fmtFrac(totalW)+'" (frame width)', "below", "#0066cc");
 
-  var dhx = fOx - 14;
+  // Overall height dimension (left)
   var htop = config.hasTop ? cubbyTop - topH * scaleF : cubbyTop;
-  fe.push(h("line",{key:k++,x1:fOx-2,y1:htop,x2:dhx-4,y2:htop,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:fOx-2,y1:fOy+fH,x2:dhx-4,y2:fOy+fH,stroke:"#888",strokeWidth:0.5}));
-  fe.push(h("line",{key:k++,x1:dhx,y1:htop,x2:dhx,y2:fOy+fH,stroke:"#555",strokeWidth:0.75}));
-  var hmy = (htop + fOy + fH) / 2;
-  fe.push(h("text",{key:k++,x:dhx-3,y:hmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(dhx-3)+","+hmy+")"},fmtFrac(overallH)+'"'));
+  dimLine(fe, k, fOx - 2, htop, fOx - 2, fOy + fH, fmtFrac(overallH)+'" total', "left", "#0066cc");
 
-  var fSvgW = drawW + margin * 2 + 30;
-  var fSvgH = fH + margin + 36;
+  // Cubby area height dimension
+  dimLine(fe, k, fOx - 24, cubbyTop, fOx - 24, shelfBase, fmtFrac(dims.cubbyAreaH)+'" cubbies', "left", "#339933");
+
+  var fSvgW = drawW + margin * 2 + 50;
+  var fSvgH = fH + margin + 42;
 
   // ── TOP VIEW ──
   var scaleT = Math.min(drawW / topW, 130 / topD);
   var tW = topW * scaleT, tH = topD * scaleT;
   var tOx = margin + (drawW - tW) / 2;
   var tOy = 16;
-  var te = []; k = 0;
-  te.push(h("rect",{key:k++,x:tOx,y:tOy,width:tW,height:tH,fill:"#eee",stroke:"#333",strokeWidth:1.5}));
+  var te = []; k = {0:0};
+  te.push(h("rect",{key:k[0]++,x:tOx,y:tOy,width:tW,height:tH,fill:"#eee",stroke:"#333",strokeWidth:1.5}));
   if (config.hasTop) {
-    te.push(h("rect",{key:k++,x:tOx+TOP_OVERHANG*scaleT,y:tOy+TOP_OVERHANG*scaleT,width:totalW*scaleT,height:totalD*scaleT,fill:"none",stroke:"#999",strokeWidth:0.75,strokeDasharray:"4,2"}));
+    te.push(h("rect",{key:k[0]++,x:tOx+TOP_OVERHANG*scaleT,y:tOy+TOP_OVERHANG*scaleT,width:totalW*scaleT,height:totalD*scaleT,fill:"none",stroke:"#999",strokeWidth:0.75,strokeDasharray:"4,2"}));
   }
-  // Column dividers for each row (shown in top view)
+  // Column dividers for each row
   for (var ri = 0; ri < rows; ri++) {
     var row = perRow[ri];
     var rowXOff = (totalW - row.rowW) / 2;
@@ -729,50 +760,335 @@ function Blueprint(props) {
       var lx = fsx + ci * (row.cubbyOpening + ft) * scaleT;
       var ly1 = tOy + (config.hasTop ? TOP_OVERHANG * scaleT : 0);
       var ly2 = ly1 + totalD * scaleT;
-      te.push(h("line",{key:k++,x1:lx,y1:ly1,x2:lx,y2:ly2,stroke:"#aaa",strokeWidth:ft*scaleT>1?ft*scaleT:0.75,opacity:0.6}));
+      te.push(h("line",{key:k[0]++,x1:lx,y1:ly1,x2:lx,y2:ly2,stroke:"#aaa",strokeWidth:ft*scaleT>1?ft*scaleT:0.75,opacity:0.6}));
     }
   }
   // Width dimension
-  var twdy = tOy + tH + 14;
-  te.push(h("line",{key:k++,x1:tOx,y1:tOy+tH+2,x2:tOx,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
-  te.push(h("line",{key:k++,x1:tOx+tW,y1:tOy+tH+2,x2:tOx+tW,y2:twdy+4,stroke:"#888",strokeWidth:0.5}));
-  te.push(h("line",{key:k++,x1:tOx,y1:twdy,x2:tOx+tW,y2:twdy,stroke:"#555",strokeWidth:0.75}));
-  te.push(h("text",{key:k++,x:tOx+tW/2,y:twdy+12,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace"},fmtFrac(topW)+'"'));
+  dimLine(te, k, tOx, tOy + tH + 2, tOx + tW, tOy + tH + 2, fmtFrac(topW)+'"', "below", "#0066cc");
   // Depth dimension
-  var tddx = tOx - 14;
-  te.push(h("line",{key:k++,x1:tOx-2,y1:tOy,x2:tddx-4,y2:tOy,stroke:"#888",strokeWidth:0.5}));
-  te.push(h("line",{key:k++,x1:tOx-2,y1:tOy+tH,x2:tddx-4,y2:tOy+tH,stroke:"#888",strokeWidth:0.5}));
-  te.push(h("line",{key:k++,x1:tddx,y1:tOy,x2:tddx,y2:tOy+tH,stroke:"#555",strokeWidth:0.75}));
-  var tdmy = tOy + tH / 2;
-  te.push(h("text",{key:k++,x:tddx-3,y:tdmy,textAnchor:"middle",fontSize:10,fill:"#333",fontFamily:"monospace",transform:"rotate(-90,"+(tddx-3)+","+tdmy+")"},fmtFrac(topD)+'"'));
+  dimLine(te, k, tOx - 2, tOy, tOx - 2, tOy + tH, fmtFrac(topD)+'"', "left", "#0066cc");
+  // Frame depth dimension (inner)
+  if (config.hasTop) {
+    var frameLeftX = tOx + TOP_OVERHANG * scaleT;
+    dimLine(te, k, frameLeftX + totalW * scaleT + 4, tOy + TOP_OVERHANG * scaleT, frameLeftX + totalW * scaleT + 4, tOy + TOP_OVERHANG * scaleT + totalD * scaleT, fmtFrac(totalD)+'" frame', "right", "#339933");
+  }
   var tSvgH = tH + 48;
 
+  // ── SIDE ELEVATION ──
+  var scaleSide = Math.min(drawW * 0.6 / totalD, 200 / overallH);
+  var sW = totalD * scaleSide, sH = overallH * scaleSide;
+  var sOx = margin + (drawW - sW) / 2;
+  var sOy = margin / 2 + 10;
+  var se = []; k = {0:0};
+  var sBaseY = sOy + sH - wheelH * scaleSide;
+  var sShelfBase = sBaseY;
+
+  // Wheels
+  if (config.hasWheels) {
+    var swh = wheelH * scaleSide;
+    [ft * 2, totalD - ft * 2].forEach(function(wz) {
+      se.push(h("circle",{key:k[0]++,cx:sOx+wz*scaleSide,cy:sOy+sH-swh/2,r:swh*0.35,fill:"#ccc",stroke:"#333",strokeWidth:0.75}));
+    });
+  }
+  if (config.hasBottomShelf) {
+    se.push(h("rect",{key:k[0]++,x:sOx,y:sBaseY-bottomH*scaleSide,width:sW,height:bottomH*scaleSide,fill:"#ddd",stroke:"#333",strokeWidth:0.75}));
+    sShelfBase = sBaseY - bottomH * scaleSide;
+  }
+  var sCubbyH = dims.cubbyAreaH * scaleSide;
+  var sCubbyTop = sShelfBase - sCubbyH;
+  se.push(h("rect",{key:k[0]++,x:sOx,y:sCubbyTop,width:sW,height:sCubbyH,fill:"none",stroke:"#333",strokeWidth:1.5}));
+
+  // Show bin depth slots in side view
+  for (var ri = 0; ri < rows; ri++) {
+    var row = perRow[ri];
+    var sRowYTop = sCubbyTop + (dims.cubbyAreaH - row.yOffset - row.cubbyTotalH) * scaleSide;
+    // Front/back uprights
+    se.push(h("rect",{key:k[0]++,x:sOx,y:sRowYTop,width:ft*scaleSide,height:row.cubbyTotalH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    se.push(h("rect",{key:k[0]++,x:sOx+sW-ft*scaleSide,y:sRowYTop,width:ft*scaleSide,height:row.cubbyTotalH*scaleSide,fill:"#ddd",stroke:"#555",strokeWidth:0.5}));
+    // Bins deep
+    for (var dd = 0; dd < row.binsDeep; dd++) {
+      var binZ = ft + dd * row.singleDepth;
+      var binZEnd = binZ + row.singleDepth - (dd === row.binsDeep - 1 ? ft : 0.5);
+      var bsx = sOx + binZ * scaleSide;
+      var bsw = (binZEnd - binZ) * scaleSide;
+      se.push(h("rect",{key:k[0]++,x:bsx,y:sRowYTop+2,width:bsw,height:row.cubbyTotalH*scaleSide-4,fill:"none",stroke:"#aaa",strokeWidth:0.5,strokeDasharray:"3,2",rx:2}));
+    }
+    // Depth dimension for this row
+    if (ri === 0) {
+      dimLine(se, k, sOx + ft * scaleSide, sRowYTop - 2, sOx + ft * scaleSide + row.cubbyDepth * scaleSide, sRowYTop - 2, fmtFrac(row.cubbyDepth)+'" cubby depth', "above", "#cc3300");
+    }
+  }
+
+  if (config.hasTop) {
+    var ov = TOP_OVERHANG;
+    se.push(h("rect",{key:k[0]++,x:sOx-ov*scaleSide,y:sCubbyTop-topH*scaleSide,width:(totalD+ov*2)*scaleSide,height:topH*scaleSide,fill:"#ccc",stroke:"#333",strokeWidth:1}));
+  }
+
+  // Overall depth dim
+  dimLine(se, k, sOx, sOy + sH + 2, sOx + sW, sOy + sH + 2, fmtFrac(totalD)+'" frame depth', "below", "#0066cc");
+  // Overall height dim
+  var sTop = config.hasTop ? sCubbyTop - topH * scaleSide : sCubbyTop;
+  dimLine(se, k, sOx - 2, sTop, sOx - 2, sOy + sH, fmtFrac(overallH)+'"', "left", "#0066cc");
+
+  var sSvgW = drawW + margin * 2 + 30;
+  var sSvgH = sH + margin + 42;
+
+  // ── BUILD PRINT HANDLER ──
   function handlePrint() {
+    var win = window.open("","_blank","width=900,height=700");
+    var doc = win.document;
+    doc.write('<!DOCTYPE html><html><head><title>Workbench Build Guide</title>');
+    doc.write('<style>');
+    doc.write('*{box-sizing:border-box;margin:0;padding:0}');
+    doc.write('body{font-family:"Courier New",Consolas,monospace;padding:0.5in;color:#222;font-size:11px;line-height:1.5}');
+    doc.write('h1{font-size:20px;margin:0 0 2px;border-bottom:2px solid #333;padding-bottom:4px}');
+    doc.write('h2{font-size:14px;margin:20px 0 6px;color:#333;border-bottom:1px solid #ccc;padding-bottom:2px;page-break-after:avoid}');
+    doc.write('h3{font-size:12px;margin:12px 0 4px;color:#444}');
+    doc.write('.subtitle{font-size:12px;color:#666;margin-bottom:12px}');
+    doc.write('.overview{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin:8px 0 16px}');
+    doc.write('.ov-box{border:1px solid #999;padding:6px 8px;text-align:center;border-radius:4px}');
+    doc.write('.ov-val{font-size:16px;font-weight:700}');
+    doc.write('.ov-lbl{font-size:9px;color:#666;text-transform:uppercase}');
+    doc.write('table{width:100%;border-collapse:collapse;margin:6px 0 12px;font-size:10px}');
+    doc.write('th{background:#eee;border:1px solid #999;padding:4px 6px;text-align:left;font-size:9px;text-transform:uppercase}');
+    doc.write('td{border:1px solid #ccc;padding:3px 6px}');
+    doc.write('tr:nth-child(even){background:#f8f8f8}');
+    doc.write('.qty{font-weight:700;text-align:center;width:40px}');
+    doc.write('.check{width:24px;text-align:center}');
+    doc.write('svg{display:block;margin:6px auto;max-width:100%;border:1px solid #ddd}');
+    doc.write('.step{margin:8px 0;padding:8px 10px;border-left:3px solid #333;background:#f9f9f9}');
+    doc.write('.step-num{font-weight:700;font-size:12px}');
+    doc.write('.step-title{font-weight:700;margin-left:6px}');
+    doc.write('.step-body{margin-top:4px;font-size:10.5px;line-height:1.6}');
+    doc.write('.tip{background:#fffde7;border:1px solid #e0d870;padding:4px 8px;margin:4px 0;font-size:10px;border-radius:3px}');
+    doc.write('.section-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}');
+    doc.write('.page-break{page-break-before:always}');
+    doc.write('@media print{body{padding:0.3in}.page-break{page-break-before:always}}');
+    doc.write('</style></head><body>');
+
+    // ── PAGE 1: TITLE + OVERVIEW + DRAWINGS ──
+    doc.write('<h1>Bin Workbench — Build Guide</h1>');
+    doc.write('<div class="subtitle">' + dims.totalBins + ' bins | ' + rows + ' row' + (rows>1?'s':'') + ' | ' + frameName + ' frame | Generated ' + new Date().toLocaleDateString() + '</div>');
+
+    // Overview stats
+    doc.write('<div class="overview">');
+    doc.write('<div class="ov-box"><div class="ov-val">' + fmtFrac(config.hasTop?dims.topW:totalW) + '"</div><div class="ov-lbl">Width</div></div>');
+    doc.write('<div class="ov-box"><div class="ov-val">' + fmtFrac(config.hasTop?dims.topD:totalD) + '"</div><div class="ov-lbl">Depth</div></div>');
+    doc.write('<div class="ov-box"><div class="ov-val">' + fmtFrac(overallH) + '"</div><div class="ov-lbl">Height</div></div>');
+    doc.write('<div class="ov-box"><div class="ov-val">' + dims.totalBins + '</div><div class="ov-lbl">Bins</div></div>');
+    doc.write('</div>');
+
+    // Row config summary
+    doc.write('<h3>Configuration</h3>');
+    doc.write('<table><tr><th>Row</th><th>Bin Size</th><th>Columns</th><th>Deep</th><th>Cubby Opening</th><th>Cubby Depth</th><th>Cubby Height</th></tr>');
+    for (var ri = 0; ri < rows; ri++) {
+      var row = perRow[ri];
+      var binName = row.binPreset === "12gal" ? "12 Gal" : row.binPreset === "27gal" ? "27 Gal" : "Custom";
+      doc.write('<tr><td class="qty">' + (ri+1) + '</td><td>' + binName + '</td><td class="qty">' + row.cols + '</td><td class="qty">' + row.binsDeep + '</td><td>' + fmtFrac(row.cubbyOpening) + '"</td><td>' + fmtFrac(row.cubbyDepth) + '"</td><td>' + fmtFrac(row.cubbyTotalH) + '"</td></tr>');
+    }
+    doc.write('</table>');
+
+    // Drawings
     var el = document.getElementById("blueprint-print-area");
-    var win = window.open("","_blank","width=800,height=600");
-    win.document.write('<!DOCTYPE html><html><head><title>Workbench Blueprint</title>');
-    win.document.write('<style>body{font-family:"Courier New",monospace;padding:24px;color:#222}h2{margin:0 0 4px}p{margin:0 0 16px;color:#555;font-size:13px}svg{display:block;margin:8px auto;border:1px solid #ccc;background:#fff;max-width:100%}.label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#555;margin:16px 0 4px}</style>');
-    win.document.write('</head><body>');
-    win.document.write('<h2>Bin Workbench Blueprint</h2>');
-    win.document.write('<p>' + dims.totalBins + ' bins — ' + rows + ' row' + (rows>1?'s':'') + ' — ' + FRAME_MATERIALS[config.frameMaterial].name + ' frame</p>');
     var svgs = el.querySelectorAll("svg");
     var labels = el.querySelectorAll(".bp-label");
     for (var i = 0; i < svgs.length; i++) {
-      if (labels[i]) win.document.write('<div class="label">' + labels[i].textContent + '</div>');
-      win.document.write(svgs[i].outerHTML);
+      if (labels[i]) doc.write('<h3>' + labels[i].textContent + '</h3>');
+      doc.write(svgs[i].outerHTML);
     }
-    win.document.write('</body></html>');
-    win.document.close();
-    setTimeout(function(){ win.print(); }, 300);
+
+    // ── PAGE 2: CUT LIST + MATERIALS ──
+    doc.write('<div class="page-break"></div>');
+    doc.write('<h2>Complete Cut List</h2>');
+    doc.write('<table><tr><th>#</th><th>Part</th><th>Material</th><th class="qty">Qty</th><th>Length / Size</th><th>Notes</th></tr>');
+    var partNum = 1;
+    // Width rails
+    doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Width Rails</td><td>' + frameName + '</td><td class="qty">' + dims.frameWidthRailCount + '</td><td>' + fmtFrac(dims.frameWidthRailLength) + '"</td><td>Front & back rails, top & bottom frames</td></tr>');
+    // Depth rails
+    doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Depth Rails</td><td>' + frameName + '</td><td class="qty">' + dims.frameDepthRailCount + '</td><td>' + fmtFrac(dims.frameDepthRailLength) + '"</td><td>Side rails, top & bottom frames</td></tr>');
+    // Frame dividers
+    if (dims.frameDividerCount > 0) {
+      doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Frame Dividers</td><td>' + frameName + '</td><td class="qty">' + dims.frameDividerCount + '</td><td>' + fmtFrac(dims.frameDividerLength) + '"</td><td>Column dividers inside top & bottom frames</td></tr>');
+    }
+    // Uprights
+    doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Vertical Uprights</td><td>' + frameName + '</td><td class="qty">' + dims.uprightCount + '</td><td>' + fmtFrac(dims.uprightLength) + '"</td><td>Connect top frame to bottom frame</td></tr>');
+    // Shelf rails
+    doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Shelf Support Rails</td><td>1×2 Common Board</td><td class="qty">' + dims.totalShelfRails + '</td><td>' + fmtFrac(dims.shelfRailLength) + '"</td><td>Bin rest rails, mounted inside cubbies</td></tr>');
+    // Plywood surfaces
+    if (config.hasTop) {
+      doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Top Surface</td><td>3/4" Plywood</td><td class="qty">1</td><td>' + fmtFrac(dims.topW) + '" × ' + fmtFrac(dims.topD) + '"</td><td>Work surface, ' + fmtFrac(TOP_OVERHANG) + '" overhang all sides</td></tr>');
+    }
+    if (config.hasBottomShelf) {
+      doc.write('<tr><td class="qty">' + partNum++ + '</td><td>Bottom Shelf</td><td>3/4" Plywood</td><td class="qty">1</td><td>' + fmtFrac(dims.totalW) + '" × ' + fmtFrac(dims.totalD) + '"</td><td>Base platform, flush with frame</td></tr>');
+    }
+    doc.write('</table>');
+
+    // Shopping list
+    doc.write('<h2>Shopping List</h2>');
+    doc.write('<div class="section-row">');
+    // Lumber column
+    doc.write('<div>');
+    doc.write('<h3>Lumber</h3>');
+    doc.write('<table><tr><th class="check">☐</th><th>Item</th><th class="qty">Qty</th><th>Notes</th></tr>');
+    doc.write('<tr><td class="check">☐</td><td>' + supplyList.frameLumberLabel + '</td><td class="qty">' + supplyList.frameLumber + '</td><td>Frame material</td></tr>');
+    doc.write('<tr><td class="check">☐</td><td>' + supplyList.shelfRailLabel + '</td><td class="qty">' + supplyList.shelfRails + '</td><td>Shelf rails</td></tr>');
+    if (supplyList.needsPlywood) {
+      doc.write('<tr><td class="check">☐</td><td>4×8 sheet 3/4" plywood</td><td class="qty">' + supplyList.plywoodSheets + '</td><td>Surfaces</td></tr>');
+    }
+    doc.write('</table></div>');
+    // Hardware column
+    doc.write('<div>');
+    doc.write('<h3>Hardware</h3>');
+    doc.write('<table><tr><th class="check">☐</th><th>Item</th><th class="qty">Qty</th><th>Notes</th></tr>');
+    if (supplyList.sameSize) {
+      doc.write('<tr><td class="check">☐</td><td>' + supplyList.frameScrewLen + ' pocket hole screws</td><td class="qty">box of ' + supplyList.combinedBox + '</td><td>' + supplyList.combinedPocket + ' needed</td></tr>');
+    } else {
+      doc.write('<tr><td class="check">☐</td><td>' + supplyList.frameScrewLen + ' pocket screws</td><td class="qty">box of ' + supplyList.frameBox + '</td><td>' + supplyList.framePocketTotal + ' needed (frames)</td></tr>');
+      doc.write('<tr><td class="check">☐</td><td>' + supplyList.shelfScrewLen + ' pocket screws</td><td class="qty">box of ' + supplyList.shelfBox + '</td><td>' + supplyList.shelfRailScrews + ' needed (shelves)</td></tr>');
+    }
+    if (supplyList.surfaceScrews > 0) {
+      doc.write('<tr><td class="check">☐</td><td>1-1/4" wood screws</td><td class="qty">box of ' + supplyList.surfaceBox + '</td><td>' + supplyList.surfaceScrews + ' needed (plywood)</td></tr>');
+    }
+    doc.write('<tr><td class="check">☐</td><td>Wood glue</td><td class="qty">1</td><td>Titebond II or III</td></tr>');
+    if (supplyList.casters > 0) {
+      doc.write('<tr><td class="check">☐</td><td>3" HD locking casters</td><td class="qty">' + supplyList.casters + '</td><td>2 locking + 2 fixed</td></tr>');
+    }
+    doc.write('</table></div>');
+    doc.write('</div>');
+
+    // Bins
+    doc.write('<h3>Bins / Totes</h3>');
+    doc.write('<table><tr><th class="check">☐</th><th>Type</th><th class="qty">Qty</th></tr>');
+    var binCounts = supplyList.binCounts;
+    for (var bp in binCounts) {
+      if (binCounts[bp] > 0) {
+        var bName = BIN_PRESETS[bp] ? BIN_PRESETS[bp].name : "Custom";
+        doc.write('<tr><td class="check">☐</td><td>' + bName + '</td><td class="qty">' + binCounts[bp] + '</td></tr>');
+      }
+    }
+    doc.write('</table>');
+
+    // Tools needed
+    doc.write('<h3>Tools Required</h3>');
+    doc.write('<table><tr><th class="check">☐</th><th>Tool</th><th>Purpose</th></tr>');
+    var tools = [
+      ["Miter saw or circular saw", "Cut lumber and plywood to size"],
+      ["Pocket hole jig (Kreg K4/K5/720)", "Drill pocket holes for all joints"],
+      ["Drill / driver", "Drive screws, drill pilot holes"],
+      ["Speed square", "Mark square cuts and check corners"],
+      ["Tape measure (25ft)", "Measure all cuts"],
+      ["Clamps (4+ bar clamps)", "Hold pieces during assembly"],
+      ["Pencil", "Mark cut lines and layout"],
+    ];
+    if (config.hasTop || config.hasBottomShelf) tools.push(["Circular saw or table saw", "Cut plywood sheets"]);
+    tools.forEach(function(t) {
+      doc.write('<tr><td class="check">☐</td><td>' + t[0] + '</td><td>' + t[1] + '</td></tr>');
+    });
+    doc.write('</table>');
+
+    // ── PAGE 3: BUILD INSTRUCTIONS ──
+    doc.write('<div class="page-break"></div>');
+    doc.write('<h2>Step-by-Step Build Instructions</h2>');
+    doc.write('<div class="tip"><strong>Before you start:</strong> Verify all lumber is straight. Sort through the pile at the store. Warped ' + frameName + ' will make a crooked workbench.</div>');
+
+    var step = 1;
+
+    // Step 1: Cut all lumber
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Cut All Lumber to Size</span></div>');
+    doc.write('<div class="step-body">Make all cuts first so you can batch-cut identical pieces. Set up a stop block on your miter saw for repeated cuts of the same length.<br>');
+    doc.write('• ' + dims.frameWidthRailCount + '× ' + frameName + ' at <strong>' + fmtFrac(dims.frameWidthRailLength) + '"</strong> (width rails)<br>');
+    doc.write('• ' + dims.frameDepthRailCount + '× ' + frameName + ' at <strong>' + fmtFrac(dims.frameDepthRailLength) + '"</strong> (depth rails)<br>');
+    if (dims.frameDividerCount > 0) doc.write('• ' + dims.frameDividerCount + '× ' + frameName + ' at <strong>' + fmtFrac(dims.frameDividerLength) + '"</strong> (frame dividers)<br>');
+    doc.write('• ' + dims.uprightCount + '× ' + frameName + ' at <strong>' + fmtFrac(dims.uprightLength) + '"</strong> (vertical uprights)<br>');
+    doc.write('• ' + dims.totalShelfRails + '× 1×2 at <strong>' + fmtFrac(dims.shelfRailLength) + '"</strong> (shelf support rails)<br>');
+    doc.write('Label each group with a Sharpie as you cut.</div></div>');
+
+    // Step 2: Drill pocket holes
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Drill Pocket Holes</span></div>');
+    doc.write('<div class="step-body">Set your pocket hole jig to ' + dims.frame.thickness + '" material thickness.<br>');
+    doc.write('• <strong>Width rails:</strong> Drill 2 pocket holes in each end of all ' + dims.frameWidthRailCount + ' width rails.<br>');
+    doc.write('• <strong>Depth rails:</strong> Drill 2 pocket holes in each end of all ' + dims.frameDepthRailCount + ' depth rails.<br>');
+    if (dims.frameDividerCount > 0) doc.write('• <strong>Dividers:</strong> Drill 2 pocket holes in each end of all ' + dims.frameDividerCount + ' dividers.<br>');
+    doc.write('• <strong>Shelf rails:</strong> Switch jig to ' + SHELF_SUPPORT.thickness + '" thickness. Drill 2 pocket holes in each end of all ' + dims.totalShelfRails + ' shelf rails.</div></div>');
+
+    // Step 3: Assemble bottom frame
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Assemble the Bottom Frame</span></div>');
+    doc.write('<div class="step-body">Build a rectangle: 2 width rails (' + fmtFrac(dims.frameWidthRailLength) + '") and 2 depth rails (' + fmtFrac(dims.frameDepthRailLength) + '").<br>');
+    doc.write('Depth rails sit between the width rails. Apply wood glue to each joint, clamp, then drive ' + supplyList.frameScrewLen + ' pocket screws.<br>');
+    doc.write('Check for square by measuring diagonals — they should be equal.<br>');
+    if (dims.frameDividerCount > 0) {
+      doc.write('Add ' + (dims.frameDividerCount / 2) + ' divider(s) inside the bottom frame, evenly spaced to match column positions. Space dividers ' + fmtFrac(perRow[0].cubbyOpening + ft) + '" apart (measured center-to-center).');
+    }
+    doc.write('</div></div>');
+
+    // Step 4: Assemble top frame (identical)
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Assemble the Top Frame</span></div>');
+    doc.write('<div class="step-body">Build an identical frame to the bottom one — same dimensions, same divider layout.<br>');
+    doc.write('You now have two matching rectangular frames.</div></div>');
+
+    // Step 5: Attach uprights
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Attach Vertical Uprights</span></div>');
+    doc.write('<div class="step-body">Stand the bottom frame on a flat surface. Attach all ' + dims.uprightCount + ' uprights (' + fmtFrac(dims.uprightLength) + '" each) vertically.<br>');
+    doc.write('• Place uprights at every column position on both front and back edges — that\'s ' + (dims.maxCols + 1) + ' uprights on the front and ' + (dims.maxCols + 1) + ' on the back.<br>');
+    doc.write('• Use a speed square to ensure each upright is perfectly plumb (90°).<br>');
+    doc.write('• Glue + two ' + supplyList.frameScrewLen + ' pocket screws per joint (top and bottom of each upright).<br>');
+    doc.write('Attach the top frame on top of the uprights the same way. Check for square.</div></div>');
+
+    // Step 6: Install shelf rails
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Install Shelf Support Rails</span></div>');
+    doc.write('<div class="step-body">The shelf rails are what the bins rest on. Install them inside each cubby on both left and right uprights.<br>');
+    for (var ri = 0; ri < rows; ri++) {
+      var row = perRow[ri];
+      doc.write('• <strong>Row ' + (ri+1) + ':</strong> Mount rails at <strong>' + fmtFrac(row.yOffset - SHELF_SUPPORT.width) + '"</strong> from the bottom of the cubby area (bottom of rail). ' + (row.cols * 2) + ' rails total — 2 per cubby column.<br>');
+    }
+    doc.write('The rails should be level and parallel. Use a scrap piece of 1×2 as a spacer jig to mark consistent heights.<br>');
+    doc.write('Attach each with glue + two 1-1/4" pocket screws into the upright.</div></div>');
+
+    // Step 7: Bottom shelf (if applicable)
+    if (config.hasBottomShelf) {
+      doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Attach Bottom Shelf</span></div>');
+      doc.write('<div class="step-body">Cut the 3/4" plywood to <strong>' + fmtFrac(dims.totalW) + '" × ' + fmtFrac(dims.totalD) + '"</strong>.<br>');
+      doc.write('Set the shelf on top of the bottom frame, flush on all edges. Attach with 1-1/4" wood screws every 8" around the perimeter and into each divider.</div></div>');
+    }
+
+    // Step 8: Top surface (if applicable)
+    if (config.hasTop) {
+      doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Attach Top Work Surface</span></div>');
+      doc.write('<div class="step-body">Cut the 3/4" plywood to <strong>' + fmtFrac(dims.topW) + '" × ' + fmtFrac(dims.topD) + '"</strong>.<br>');
+      doc.write('Center it on the top frame with ' + fmtFrac(TOP_OVERHANG) + '" overhang on all sides. Attach with 1-1/4" wood screws every 8" around the perimeter and into each divider.<br>');
+      doc.write('<em>Optional:</em> Round over the top edges with a router and 1/4" roundover bit for comfort.</div></div>');
+    }
+
+    // Step 9: Casters (if applicable)
+    if (config.hasWheels) {
+      doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Install Caster Wheels</span></div>');
+      doc.write('<div class="step-body">Flip the workbench upside down (get a helper — it\'s heavy).<br>');
+      doc.write('Mount the 4 casters at the corners of the bottom frame, inset about 2" from each edge. Use the mounting screws that come with the casters.<br>');
+      doc.write('Place the 2 locking casters on the same side (usually the front). Flip upright and test that it rolls freely and the locks engage.</div></div>');
+    }
+
+    // Final step: Load bins
+    doc.write('<div class="step"><div><span class="step-num">Step ' + step++ + '.</span><span class="step-title">Load Bins & Test</span></div>');
+    doc.write('<div class="step-body">Slide all ' + dims.totalBins + ' bins into the cubbies. They should slide smoothly on the shelf rails with a small amount of clearance.<br>');
+    doc.write('If any bin is tight, sand the shelf rails slightly or check for proud screws.<br>');
+    doc.write('Lock the casters and push down on the top to check for stability. If any racking, add a 1/4" plywood panel to the back.</div></div>');
+
+    doc.write('<div class="tip" style="margin-top:16px"><strong>Optional finishing:</strong> Sand everything to 120 grit, then apply 2 coats of polyurethane or your preferred finish. The top work surface benefits most from a durable finish.</div>');
+
+    doc.write('</body></html>');
+    doc.close();
+    setTimeout(function(){ win.print(); }, 400);
   }
 
   return h("div",null,
     h("div",{style:{display:"flex",gap:8,marginBottom:12}},
-      h("button",{onClick:handlePrint,style:{padding:"8px 16px",background:"var(--btn-bg)",color:"var(--gold)",border:"1px solid var(--border)",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}},"🖨 Print Blueprint")
+      h("button",{onClick:handlePrint,style:{padding:"10px 20px",background:"var(--gold)",color:"#000",border:"none",borderRadius:6,fontSize:13,fontWeight:700,cursor:"pointer"}},"🖨 Print Full Build Guide")
     ),
     h("div",{id:"blueprint-print-area"},
       h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Front Elevation"),
       h("svg",{viewBox:"0 0 "+fSvgW+" "+fSvgH,style:{width:"100%",maxWidth:600,height:"auto",background:"#fff",borderRadius:8,border:"1px solid var(--border)"}},fe),
+      h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginTop:12,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Side Elevation"),
+      h("svg",{viewBox:"0 0 "+sSvgW+" "+sSvgH,style:{width:"100%",maxWidth:600,height:"auto",background:"#fff",borderRadius:8,border:"1px solid var(--border)"}},se),
       h("div",{className:"bp-label",style:{fontSize:11,fontWeight:700,color:"var(--gold)",marginTop:12,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}},"Top View (Plan)"),
       h("svg",{viewBox:"0 0 "+fSvgW+" "+tSvgH,style:{width:"100%",maxWidth:600,height:"auto",background:"#fff",borderRadius:8,border:"1px solid var(--border)"}},te)
     )
